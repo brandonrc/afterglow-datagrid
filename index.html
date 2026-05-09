@@ -190,6 +190,67 @@ class LargeModel extends DataModel {
 
 afterglow.DataModel = DataModel;
 afterglow.LargeModel = LargeModel;
+
+class JSONModel extends DataModel {
+  constructor(rows, columns) {
+    super();
+    this._rows = rows;
+    this._cols = columns;
+  }
+  rowCount(region) { return region === 'body' ? this._rows.length : 1; }
+  columnCount(region) { return region === 'body' ? this._cols.length : 1; }
+  data(region, row, col) {
+    if (region === 'corner-header') return '';
+    if (region === 'row-header') return String(row);
+    if (region === 'column-header') return this._cols[col];
+    return this._rows[row][col];
+  }
+}
+
+class SortableModel extends DataModel {
+  constructor(jsonModel, { frozenRows = 0, frozenCols = 0 } = {}) {
+    super();
+    this._inner = jsonModel;
+    this._perm = null;
+    this._sortCol = -1;
+    this._sortDir = 0;
+    this.frozenRows = frozenRows;
+    this.frozenCols = frozenCols;
+  }
+  rowCount(region) { return this._inner.rowCount(region); }
+  columnCount(region) { return this._inner.columnCount(region); }
+  data(region, row, col) {
+    if (region === 'body' && this._perm) row = this._perm[row];
+    return this._inner.data(region, row, col);
+  }
+  sortByColumn(col) {
+    if (this._sortCol !== col) { this._sortCol = col; this._sortDir = 1; }
+    else if (this._sortDir === 1) this._sortDir = -1;
+    else { this._sortCol = -1; this._sortDir = 0; }
+    if (this._sortDir === 0) {
+      this._perm = null;
+    } else {
+      const n = this._inner.rowCount('body');
+      const idx = new Array(n);
+      for (let i = 0; i < n; i++) idx[i] = i;
+      const dir = this._sortDir;
+      idx.sort((a, b) => {
+        const va = this._inner.data('body', a, col);
+        const vb = this._inner.data('body', b, col);
+        if (va < vb) return -1 * dir;
+        if (va > vb) return 1 * dir;
+        return 0;
+      });
+      this._perm = idx;
+    }
+    this.emit('reset');
+    return { col: this._sortCol, dir: this._sortDir };
+  }
+}
+
+afterglow.JSONModel = JSONModel;
+afterglow.SortableModel = SortableModel;
+afterglow.makeCarsModel = () => new JSONModel(CARS_DATA, CARS_COLUMNS);
   </script>
 </body>
 </html>

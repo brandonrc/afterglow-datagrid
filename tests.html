@@ -190,6 +190,48 @@
         expect(m.rowCount('body')).toBe(Number.MAX_SAFE_INTEGER);
       });
     });
+
+    describe('JSONModel', () => {
+      it('returns column names for column-header', async () => {
+        const m = AG().makeCarsModel();
+        expect(m.data('column-header', 0, 0)).toBe('Name');
+        expect(m.data('column-header', 0, 1)).toBe('MPG');
+      });
+      it('returns row data for body', async () => {
+        const m = AG().makeCarsModel();
+        expect(typeof m.data('body', 0, 0)).toBe('string');
+      });
+      it('rowCount matches CARS_DATA length', async () => {
+        const m = AG().makeCarsModel();
+        expect(m.rowCount('body')).toBe(AG().CARS_DATA.length);
+      });
+    });
+
+    describe('SortableModel', () => {
+      it('first sortByColumn is ascending', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        const r = m.sortByColumn(1);
+        expect(r.dir).toBe(1);
+      });
+      it('second click on same column is descending', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        m.sortByColumn(1); m.sortByColumn(1);
+        expect(m._sortDir).toBe(-1);
+      });
+      it('third click clears sort', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        m.sortByColumn(1); m.sortByColumn(1); m.sortByColumn(1);
+        expect(m._sortDir).toBe(0);
+        expect(m._perm).toBe(null);
+      });
+      it('ascending sort puts smallest MPG first', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        m.sortByColumn(1);
+        const v0 = m.data('body', 0, 1);
+        const v1 = m.data('body', 1, 1);
+        expect(v0 <= v1).toBe(true);
+      });
+    });
     // === END TESTS ===
 
     run();
