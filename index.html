@@ -351,6 +351,50 @@ class FirehoseModel extends DataModel {
   }
 }
 afterglow.FirehoseModel = FirehoseModel;
+
+// §4 Styles (CPU side — used by text + overlay layers)
+const DEFAULT_STYLE = Object.freeze({
+  bg: '#ffffff',
+  gridline: '#e0e0e0',
+  rowHeaderBg: '#f7f7f7',
+  colHeaderBg: '#f7f7f7',
+  selectionFill: 'rgba(33,150,243,0.2)',
+  selectionBorder: 'rgba(33,150,243,0.9)',
+  cursorBorder: '#2196f3',
+  rowStripeA: '',
+  rowStripeB: '',
+  colStripeA: '',
+  colStripeB: ''
+});
+const BLUE_STRIPE_STYLE = Object.freeze({ ...DEFAULT_STYLE, rowStripeA: 'rgba(138,172,200,0.3)', colStripeA: 'rgba(100,100,100,0.1)' });
+const BROWN_STRIPE_STYLE = Object.freeze({ ...DEFAULT_STYLE, colStripeA: 'rgba(165,143,53,0.2)' });
+const GREEN_STRIPE_STYLE = Object.freeze({ ...DEFAULT_STYLE, rowStripeA: 'rgba(64,115,53,0.2)' });
+const LIGHT_SELECTION_STYLE = Object.freeze({ ...DEFAULT_STYLE, selectionFill: 'rgba(255,255,255,0.2)', selectionBorder: 'white', cursorBorder: 'white' });
+
+afterglow.styles = { DEFAULT_STYLE, BLUE_STRIPE_STYLE, BROWN_STRIPE_STYLE, GREEN_STRIPE_STYLE, LIGHT_SELECTION_STYLE };
+
+// CPU cell renderers — return { font, color, format, align }
+const textRenderer = () => ({ font: '12px ui-sans-serif, sans-serif', color: '#000', align: 'left', format: (v) => v == null ? '' : String(v) });
+const redGreenBlackRenderer = () => ({
+  font: 'bold 12px ui-sans-serif, sans-serif',
+  color: (v) => (v <= 1/3 ? '#000' : v <= 2/3 ? '#f00' : '#009b00'),
+  align: 'right',
+  format: (v) => v.toFixed(2)
+});
+const viridisInverseTextRenderer = () => ({
+  font: '12px ui-sans-serif, sans-serif',
+  color: (v) => {
+    const i = Math.max(0, Math.min(255, Math.floor(v * 255)));
+    const r = 255 - VIRIDIS_LUT_256[i*3];
+    const g = 255 - VIRIDIS_LUT_256[i*3+1];
+    const b = 255 - VIRIDIS_LUT_256[i*3+2];
+    return `rgb(${r},${g},${b})`;
+  },
+  align: 'right',
+  format: (v) => v.toFixed(2)
+});
+
+afterglow.renderers = { textRenderer, redGreenBlackRenderer, viridisInverseTextRenderer };
   </script>
 </body>
 </html>

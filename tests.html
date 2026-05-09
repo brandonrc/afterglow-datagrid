@@ -309,6 +309,24 @@
         m.destroy();
       });
     });
+
+    describe('cell renderers', () => {
+      it('redGreenBlackRenderer color buckets', async () => {
+        const r = AG().renderers.redGreenBlackRenderer();
+        expect(r.color(0.1)).toBe('#000');
+        expect(r.color(0.5)).toBe('#f00');
+        expect(r.color(0.9)).toBe('#009b00');
+      });
+      it('viridisInverseTextRenderer returns rgb string', async () => {
+        const r = AG().renderers.viridisInverseTextRenderer();
+        const c = r.color(0);
+        expect(c.startsWith('rgb(')).toBe(true);
+      });
+      it('format produces 2-digit fixed', async () => {
+        const r = AG().renderers.redGreenBlackRenderer();
+        expect(r.format(0.123456)).toBe('0.12');
+      });
+    });
     // === END TESTS ===
 
     run();
