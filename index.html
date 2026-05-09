@@ -1058,9 +1058,22 @@ class Grid {
     }
   }
   paint() {
+    const fast = this._scrollVelocity > 1.5;
     if (this._dirty.fill) this.paintFill();
-    if (this._dirty.text) this.paintText();
+    if (!fast && this._dirty.text) this.paintText();
     if (this._dirty.overlay) this.paintOverlay();
+    if (fast && this._dirty.text && !this._idleTextScheduled) {
+      this._idleTextScheduled = true;
+      const tryRefresh = () => {
+        if (this._scrollVelocity <= 1.5) {
+          this._idleTextScheduled = false;
+          afterglow.scheduler.schedule(6, this._paintBound);
+        } else {
+          afterglow.scheduler.scheduleIdle(tryRefresh);
+        }
+      };
+      afterglow.scheduler.scheduleIdle(tryRefresh);
+    }
   }
 }
 afterglow.Grid = Grid;
