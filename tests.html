@@ -62,7 +62,35 @@
     }
 
     // === START TESTS ===
-    // (test groups appended by subsequent tasks)
+    describe('constants', () => {
+      it('VIRIDIS_LUT_256 has 768 bytes (256 RGB triples)', async () => {
+        expect(AG().VIRIDIS_LUT_256.length).toBe(768);
+      });
+      it('viridis(0) returns dark purple', async () => {
+        const [r, g, b] = AG().viridis(0);
+        expect(r).toBeLessThan(80);
+        expect(g).toBeLessThan(10);
+        expect(b).toBeGreaterThan(70);
+      });
+      it('viridis(1) returns yellow-green', async () => {
+        const [r, g, b] = AG().viridis(1);
+        expect(r).toBeGreaterThan(200);
+        expect(g).toBeGreaterThan(200);
+        expect(b).toBeLessThan(150);
+      });
+      it('viridis is monotonic in luminance from 0 to 1', async () => {
+        const lum = (rgb) => 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2];
+        expect(lum(AG().viridis(0))).toBeLessThan(lum(AG().viridis(1)));
+      });
+      it('BRAND has expected token shape', async () => {
+        const b = AG().BRAND;
+        expect(typeof b.magenta).toBe('string');
+        expect(typeof b.cyan).toBe('string');
+      });
+      it('CARS_COLUMNS has 9 entries', async () => {
+        expect(AG().CARS_COLUMNS.length).toBe(9);
+      });
+    });
     // === END TESTS ===
 
     run();
