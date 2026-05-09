@@ -5,9 +5,43 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Afterglow — phosphor faded.</title>
   <style>
-    :root { color-scheme: dark; }
-    html, body { margin: 0; padding: 0; height: 100%; background: #0b0d11; color: #e6e8ec; font: 13px/1.4 -apple-system, "Segoe UI", Roboto, ui-sans-serif, sans-serif; }
+    :root {
+      color-scheme: dark;
+      --ag-magenta: #d946ef;
+      --ag-cyan: #06b6d4;
+      --ag-bg: #0b0d11;
+      --ag-fg: #e6e8ec;
+      --ag-panel: #11151b;
+      --ag-border: #1f262f;
+    }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--ag-bg); color: var(--ag-fg); font: 13px/1.4 -apple-system, "Segoe UI", Roboto, ui-sans-serif, sans-serif; overflow: hidden; }
     #app { position: fixed; inset: 0; }
+    .ag-split { position: absolute; inset: 0; display: flex; }
+    .ag-split.h { flex-direction: row; }
+    .ag-split.v { flex-direction: column; }
+    .ag-split > .ag-child { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; }
+    .ag-splitter { flex: 0 0 4px; background: var(--ag-border); cursor: col-resize; user-select: none; transition: background 120ms; }
+    .ag-splitter:hover { background: var(--ag-magenta); }
+    .ag-split.v > .ag-splitter { cursor: row-resize; }
+    .ag-tab-node { position: relative; height: 100%; width: 100%; display: flex; flex-direction: column; background: var(--ag-bg); }
+    .ag-tab-strip { flex: 0 0 28px; display: flex; background: var(--ag-panel); border-bottom: 1px solid var(--ag-border); align-items: stretch; user-select: none; overflow: hidden; }
+    .ag-tab { padding: 0 14px; display: flex; align-items: center; cursor: pointer; color: #94a3b8; border-right: 1px solid var(--ag-border); position: relative; white-space: nowrap; font-size: 12px; }
+    .ag-tab:hover { background: rgba(255,255,255,0.03); color: #cbd5e1; }
+    .ag-tab.active { background: var(--ag-bg); color: var(--ag-fg); }
+    .ag-tab.active::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--ag-magenta); }
+    .ag-tab-content { position: relative; flex: 1; overflow: hidden; }
+    .ag-grid { background: white; }
+    .ag-drop-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 999; }
+    .ag-drop-zone { position: absolute; background: rgba(217,70,239,0.15); border: 2px dashed rgba(217,70,239,0.7); display: flex; align-items: center; justify-content: center; color: var(--ag-magenta); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; pointer-events: auto; }
+    .ag-drop-zone.hover { background: rgba(217,70,239,0.45); }
+    .ag-drag-hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 6px 10px; background: rgba(11,13,17,0.85); border: 1px solid var(--ag-border); border-radius: 4px; font: 11px ui-monospace, Menlo, monospace; color: var(--ag-fg); z-index: 1000; }
+    .ag-drag-hint kbd { background: var(--ag-panel); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--ag-border); font-family: inherit; }
+    .ag-wordmark { position: absolute; left: 8px; top: 4px; z-index: 100; font-weight: 600; letter-spacing: 0.08em; font-size: 11px; color: var(--ag-fg); pointer-events: none; }
+    .ag-wordmark::before { content: ''; position: absolute; left: -16px; top: -8px; width: 100px; height: 36px; background: radial-gradient(closest-side, rgba(217,70,239,0.25), transparent 70%); pointer-events: none; }
+    .ag-hud { position: fixed; right: 8px; top: 8px; padding: 8px 10px; background: rgba(11,13,17,0.85); border: 1px solid var(--ag-border); border-radius: 4px; font: 11px/1.3 ui-monospace, Menlo, monospace; color: var(--ag-fg); z-index: 200; min-width: 200px; }
+    .ag-hud .row { display: flex; justify-content: space-between; gap: 16px; }
+    .ag-hud .row .v { color: #4ade80; font-variant-numeric: tabular-nums; }
+    .ag-hud h3 { font-size: 10px; margin: 8px 0 2px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
   </style>
 </head>
 <body>
@@ -1112,6 +1146,143 @@ afterglow.demoOverlayGrid = () => {
   g.resize(600, 400);
   g.paint();
   return g;
+};
+
+// §8 Dock tree
+const _tabNodeRegistry = new WeakMap();
+
+class TabNode {
+  constructor() {
+    this.kind = 'tab';
+    this.parent = null;
+    this.tabs = [];
+    this.activeIndex = 0;
+    this._buildDOM();
+    _tabNodeRegistry.set(this.el, this);
+  }
+  _buildDOM() {
+    this.el = document.createElement('div');
+    this.el.className = 'ag-tab-node';
+    this.strip = document.createElement('div');
+    this.strip.className = 'ag-tab-strip';
+    this.contentEl = document.createElement('div');
+    this.contentEl.className = 'ag-tab-content';
+    this.el.appendChild(this.strip);
+    this.el.appendChild(this.contentEl);
+  }
+  addTab(tab) {
+    this.tabs.push(tab);
+    if (this.tabs.length === 1) this.activeIndex = 0;
+    this._render();
+  }
+  removeTab(tab) {
+    const i = this.tabs.indexOf(tab);
+    if (i < 0) return;
+    this.tabs.splice(i, 1);
+    if (this.activeIndex >= this.tabs.length) this.activeIndex = this.tabs.length - 1;
+    this._render();
+  }
+  setActive(i) {
+    this.activeIndex = i;
+    this._render();
+  }
+  _render() {
+    this.strip.innerHTML = '';
+    this.contentEl.innerHTML = '';
+    this.tabs.forEach((tab, i) => {
+      const t = document.createElement('div');
+      t.className = 'ag-tab' + (i === this.activeIndex ? ' active' : '');
+      t.textContent = tab.title;
+      t.dataset.tabIndex = i;
+      this.strip.appendChild(t);
+    });
+    if (this.tabs[this.activeIndex]) {
+      this.contentEl.appendChild(this.tabs[this.activeIndex].content.el);
+      requestAnimationFrame(() => {
+        const r = this.contentEl.getBoundingClientRect();
+        const c = this.tabs[this.activeIndex].content;
+        if (c && typeof c.resize === 'function') {
+          c.resize(r.width, r.height);
+          if (typeof c.paint === 'function') c.paint();
+        }
+      });
+    }
+  }
+}
+
+class SplitNode {
+  constructor(orientation) {
+    this.kind = 'split';
+    this.parent = null;
+    this.orientation = orientation;
+    this.children = [];
+    this.sizes = [];
+    this._buildDOM();
+  }
+  _buildDOM() {
+    this.el = document.createElement('div');
+    this.el.className = 'ag-split ' + this.orientation;
+  }
+  addChild(node, size) {
+    node.parent = this;
+    this.children.push(node);
+    if (size != null) this.sizes.push(size);
+    else this.sizes.push(1 / this.children.length);
+    const sum = this.sizes.reduce((a, b) => a + b, 0);
+    this.sizes = this.sizes.map(s => s / sum);
+    this._render();
+  }
+  _render() {
+    this.el.innerHTML = '';
+    this.children.forEach((child, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'ag-child';
+      wrap.style.flex = this.sizes[i] + ' 0 0';
+      wrap.appendChild(child.el);
+      this.el.appendChild(wrap);
+      if (i < this.children.length - 1) {
+        const splitter = document.createElement('div');
+        splitter.className = 'ag-splitter';
+        splitter.dataset.idx = i;
+        this.el.appendChild(splitter);
+      }
+    });
+    requestAnimationFrame(() => this._propagateResize());
+  }
+  _propagateResize() {
+    for (const ch of this.children) {
+      if (ch.kind === 'tab') {
+        const active = ch.tabs[ch.activeIndex];
+        if (active && active.content && typeof active.content.resize === 'function') {
+          const r = ch.contentEl.getBoundingClientRect();
+          active.content.resize(r.width, r.height);
+          if (typeof active.content.paint === 'function') active.content.paint();
+        }
+      } else if (ch.kind === 'split') {
+        ch._propagateResize();
+      }
+    }
+  }
+}
+
+afterglow.TabNode = TabNode;
+afterglow.SplitNode = SplitNode;
+afterglow._findTabNodeByEl = (el) => _tabNodeRegistry.get(el);
+
+// Manual smoke
+afterglow.demoDockBasic = () => {
+  const root = new SplitNode('h');
+  const left = new TabNode();
+  const right = new TabNode();
+  root.addChild(left); root.addChild(right);
+  document.getElementById('app').appendChild(root.el);
+  const m1 = afterglow.makeCarsModel();
+  const m2 = new LargeModel(1000, 50);
+  const g1 = new Grid({ model: m1 });
+  const g2 = new Grid({ model: m2, fillProgram: 'stripe', stripeColors: { a: [0.85,0.27,0.94,0.15], b: [0.02,0.71,0.83,0.05] } });
+  left.addTab({ title: 'Cars', content: g1 });
+  right.addTab({ title: 'Large', content: g2 });
+  return root;
 };
   </script>
 </body>

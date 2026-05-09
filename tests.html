@@ -436,6 +436,21 @@
         g.destroy();
       });
     });
+
+    describe('Dock tree', () => {
+      it('TabNode addTab increases length', async () => {
+        const tn = new (AG().TabNode)();
+        tn.addTab({ title: 'a', content: { el: document.createElement('div'), resize: () => {}, paint: () => {} } });
+        expect(tn.tabs.length).toBe(1);
+      });
+      it('SplitNode normalizes sizes', async () => {
+        const sn = new (AG().SplitNode)('h');
+        const a = new (AG().TabNode)(); const b = new (AG().TabNode)();
+        sn.addChild(a); sn.addChild(b);
+        expect(sn.sizes[0]).toBeCloseTo(0.5);
+        expect(sn.sizes[1]).toBeCloseTo(0.5);
+      });
+    });
     // === END TESTS ===
 
     run();
