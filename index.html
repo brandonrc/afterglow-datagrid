@@ -729,6 +729,7 @@ class Grid {
     this._unsubs = [];
     this._buildDOM();
     this._wireModel();
+    this._initWorker();
   }
   _buildDOM() {
     this.el = document.createElement('div');
@@ -761,7 +762,34 @@ class Grid {
     this._unsubs.push(this.model.on('rows-removed', invalidate));
     this._unsubs.push(this.model.on('reset', invalidate));
   }
-  destroy() { for (const u of this._unsubs) u(); this._unsubs = []; }
+  _initWorker() {
+    this._worker = null;
+    this._workerReady = (async () => {
+      try {
+        const w = await spawnRendererWorker();
+        const off = this.fillCanvas.transferControlToOffscreen();
+        w.postMessage({
+          op: 'init',
+          offscreenCanvas: off,
+          shaders: { vs: SHADER_VS, stripe: SHADER_FS_STRIPE, viridis: SHADER_FS_VIRIDIS, flat: SHADER_FS_FLAT },
+          lut: VIRIDIS_LUT_256.buffer.slice(0),
+          dprIn: this.dpr
+        }, [off]);
+        if (this.cssWidth > 0 && this.cssHeight > 0) {
+          w.postMessage({ op: 'resize', cssW: this.cssWidth, cssH: this.cssHeight, dprIn: this.dpr });
+        }
+        this._worker = w;
+      } catch (err) {
+        console.error('Worker init failed:', err);
+        this._workerFailed = true;
+      }
+    })();
+  }
+  destroy() {
+    for (const u of this._unsubs) u();
+    this._unsubs = [];
+    if (this._worker) { this._worker.terminate(); this._worker = null; }
+  }
   resize(cssW, cssH) {
     this.cssWidth = cssW; this.cssHeight = cssH;
     const px = (n) => Math.floor(n * this.dpr);
@@ -774,6 +802,13 @@ class Grid {
     this._overlayCtx.resetTransform?.(); this._overlayCtx.scale(this.dpr, this.dpr);
     this._textCache.invalidateAll();
     this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
+    if (this._worker) {
+      this._worker.postMessage({ op: 'resize', cssW, cssH, dprIn: this.dpr });
+    } else if (this._workerReady) {
+      this._workerReady.then(() => {
+        if (this._worker) this._worker.postMessage({ op: 'resize', cssW, cssH, dprIn: this.dpr });
+      });
+    }
   }
   paintOverlay() {
     const ctx = this._overlayCtx;
@@ -848,6 +883,49 @@ class Grid {
     }
     tile.dirty = false;
   }
+  paintFill() {
+    const w = this._worker;
+    if (!w) return;
+    const m = this.model;
+    const totalRows = m.rowCount('body');
+    const totalCols = m.columnCount('body');
+    const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
+    const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, totalRows);
+    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
+    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, totalCols);
+    const rows = Math.max(0, r1 - r0 + 1);
+    const cols = Math.max(0, c1 - c0 + 1);
+    const total = rows * cols;
+    const buf = new Float32Array(total * 3);
+    let i = 0;
+    if (this.fillProgram === 'viridis' && typeof m.getValueBuffer === 'function') {
+      const vb = m.getValueBuffer();
+      const stride = totalCols;
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+        buf[i++] = c; buf[i++] = r; buf[i++] = vb[r * stride + c];
+      }
+    } else if (this.fillProgram === 'stripe') {
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+        buf[i++] = c; buf[i++] = r; buf[i++] = (r + c) & 1;
+      }
+    } else {
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+        buf[i++] = c; buf[i++] = r; buf[i++] = 0;
+      }
+    }
+    w.postMessage({ op: 'setView', scrollX: this.scrollX - this.rowHeaderWidth, scrollY: this.scrollY - this.colHeaderHeight });
+    w.postMessage({
+      op: 'setStyle',
+      activeProgram: this.fillProgram,
+      cellSize: [this.colWidth, this.rowHeight],
+      stripeA: (this.stripeColors && this.stripeColors.a) || [0,0,0,0],
+      stripeB: (this.stripeColors && this.stripeColors.b) || [0,0,0,0],
+      flatColor: (this.stripeColors && this.stripeColors.flat) || [1,1,1,1]
+    });
+    w.postMessage({ op: 'uploadInstances', buffer: buf.buffer, count: total }, [buf.buffer]);
+    w.postMessage({ op: 'paint' });
+    this._dirty.fill = false;
+  }
   _paintHeaders() {
     const ctx = this._textCtx;
     const m = this.model;
@@ -873,6 +951,7 @@ class Grid {
     }
   }
   paint() {
+    if (this._dirty.fill) this.paintFill();
     if (this._dirty.text) this.paintText();
     if (this._dirty.overlay) this.paintOverlay();
   }
@@ -880,6 +959,21 @@ class Grid {
 afterglow.Grid = Grid;
 
 // Manual smoke helper
+afterglow.demoHeatmapGrid = () => {
+  const m = new RandomTicksModel(80, 80, 60, { mode: 'single' });
+  const g = new Grid({
+    model: m,
+    fillProgram: 'viridis',
+    renderer: viridisInverseTextRenderer(),
+    style: LIGHT_SELECTION_STYLE
+  });
+  g.el.style.cssText += 'width:600px;height:400px;left:8px;top:8px;border:1px solid #d946ef;background:white;z-index:9999;';
+  document.body.appendChild(g.el);
+  g.resize(600, 400);
+  setInterval(() => g.paint(), 16);
+  return g;
+};
+
 afterglow.demoTextGrid = () => {
   const m = afterglow.makeCarsModel();
   const g = new Grid({ model: m });
