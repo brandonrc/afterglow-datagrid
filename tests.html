@@ -232,6 +232,41 @@
         expect(v0 <= v1).toBe(true);
       });
     });
+
+    describe('RandomTicksModel', () => {
+      it('initializes a Float32Array of correct size', async () => {
+        const m = new (AG().RandomTicksModel)(15, 10, 1000);
+        expect(m.getValueBuffer().length).toBe(150);
+        m.destroy();
+      });
+      it('values are between 0 and 1', async () => {
+        const m = new (AG().RandomTicksModel)(15, 10, 1000);
+        const buf = m.getValueBuffer();
+        let allInRange = true;
+        for (let i = 0; i < buf.length; i++) if (buf[i] < 0 || buf[i] >= 1) allInRange = false;
+        expect(allInRange).toBe(true);
+        m.destroy();
+      });
+      it('single-mode tick emits cells-changed with span 1x1', async () => {
+        const m = new (AG().RandomTicksModel)(5, 5, 5);
+        let evt = null;
+        m.on('cells-changed', (e) => { evt = e; });
+        await new Promise(r => setTimeout(r, 30));
+        expect(evt === null).toBe(false);
+        expect(evt.rowSpan).toBe(1);
+        expect(evt.colSpan).toBe(1);
+        m.destroy();
+      });
+      it('all-mode tick emits one event covering full body', async () => {
+        const m = new (AG().RandomTicksModel)(5, 5, 5, { mode: 'all' });
+        let evt = null;
+        m.on('cells-changed', (e) => { evt = e; });
+        await new Promise(r => setTimeout(r, 30));
+        expect(evt.rowSpan).toBe(5);
+        expect(evt.colSpan).toBe(5);
+        m.destroy();
+      });
+    });
     // === END TESTS ===
 
     run();

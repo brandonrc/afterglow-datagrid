@@ -251,6 +251,43 @@ class SortableModel extends DataModel {
 afterglow.JSONModel = JSONModel;
 afterglow.SortableModel = SortableModel;
 afterglow.makeCarsModel = () => new JSONModel(CARS_DATA, CARS_COLUMNS);
+
+class RandomTicksModel extends DataModel {
+  constructor(rowCount, colCount, intervalMs, { mode = 'single' } = {}) {
+    super();
+    this._rows = rowCount;
+    this._cols = colCount;
+    this._buf = new Float32Array(rowCount * colCount);
+    for (let i = 0; i < this._buf.length; i++) this._buf[i] = Math.random();
+    this._mode = mode;
+    this._timer = setInterval(() => this._tick(), intervalMs);
+  }
+  destroy() { clearInterval(this._timer); }
+  rowCount(region) { return region === 'body' ? this._rows : 1; }
+  columnCount(region) { return region === 'body' ? this._cols : 1; }
+  data(region, row, col) {
+    if (region === 'row-header') return `R: ${row}, ${col}`;
+    if (region === 'column-header') return `C: ${row}, ${col}`;
+    if (region === 'corner-header') return `N: ${row}, ${col}`;
+    return this._buf[row * this._cols + col];
+  }
+  getValueBuffer() { return this._buf; }
+  _tick() {
+    if (this._mode === 'all') {
+      for (let i = 0; i < this._buf.length; i++) {
+        this._buf[i] = (this._buf[i] + Math.random()) % 1;
+      }
+      this.emit('cells-changed', { region: 'body', row: 0, col: 0, rowSpan: this._rows, colSpan: this._cols });
+    } else {
+      const i = Math.floor(Math.random() * this._buf.length);
+      const r = Math.floor(i / this._cols);
+      const c = i - r * this._cols;
+      this._buf[i] = (this._buf[i] + Math.random()) % 1;
+      this.emit('cells-changed', { region: 'body', row: r, col: c, rowSpan: 1, colSpan: 1 });
+    }
+  }
+}
+afterglow.RandomTicksModel = RandomTicksModel;
   </script>
 </body>
 </html>
