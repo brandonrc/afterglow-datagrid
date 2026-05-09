@@ -803,13 +803,78 @@ class Grid {
     }
     this._dirty.overlay = false;
   }
+  paintText() {
+    const ctx = this._textCtx;
+    const m = this.model;
+    const r = this.renderer;
+    ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+    const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
+    const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, m.rowCount('body'));
+    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
+    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, m.columnCount('body'));
+    ctx.font = typeof r.font === 'string' ? r.font : '12px ui-sans-serif, sans-serif';
+    ctx.textBaseline = 'middle';
+    for (let row = r0; row <= r1; row++) {
+      for (let col = c0; col <= c1; col++) {
+        const v = m.data('body', row, col);
+        const text = typeof r.format === 'function' ? r.format(v) : String(v);
+        const color = typeof r.color === 'function' ? r.color(v) : r.color;
+        ctx.fillStyle = color;
+        const x = this.rowHeaderWidth + col * this.colWidth - this.scrollX;
+        const y = this.colHeaderHeight + row * this.rowHeight - this.scrollY + this.rowHeight / 2;
+        const align = r.align || 'left';
+        ctx.textAlign = align;
+        let tx = x + 4;
+        if (align === 'right') tx = x + this.colWidth - 4;
+        else if (align === 'center') tx = x + this.colWidth / 2;
+        ctx.fillText(text, tx, y);
+      }
+    }
+    this._paintHeaders();
+    this._dirty.text = false;
+  }
+  _paintHeaders() {
+    const ctx = this._textCtx;
+    const m = this.model;
+    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
+    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, m.columnCount('body'));
+    const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
+    const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, m.rowCount('body'));
+    ctx.fillStyle = this.style.colHeaderBg;
+    ctx.fillRect(0, 0, this.cssWidth, this.colHeaderHeight);
+    ctx.fillStyle = this.style.rowHeaderBg;
+    ctx.fillRect(0, 0, this.rowHeaderWidth, this.cssHeight);
+    ctx.fillStyle = '#000';
+    ctx.font = '12px ui-sans-serif, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    for (let col = c0; col <= c1; col++) {
+      const x = this.rowHeaderWidth + col * this.colWidth - this.scrollX + 4;
+      ctx.fillText(String(m.data('column-header', 0, col)), x, this.colHeaderHeight / 2);
+    }
+    for (let row = r0; row <= r1; row++) {
+      const y = this.colHeaderHeight + row * this.rowHeight - this.scrollY + this.rowHeight / 2;
+      ctx.fillText(String(m.data('row-header', row, 0)), 4, y);
+    }
+  }
   paint() {
+    if (this._dirty.text) this.paintText();
     if (this._dirty.overlay) this.paintOverlay();
   }
 }
 afterglow.Grid = Grid;
 
 // Manual smoke helper
+afterglow.demoTextGrid = () => {
+  const m = afterglow.makeCarsModel();
+  const g = new Grid({ model: m });
+  g.el.style.cssText += 'width:800px;height:400px;left:8px;top:8px;border:1px solid #d946ef;background:white;z-index:9999;';
+  document.body.appendChild(g.el);
+  g.resize(800, 400);
+  g.paint();
+  return g;
+};
+
 afterglow.demoOverlayGrid = () => {
   const m = new LargeModel(100, 50);
   const g = new Grid({ model: m });
