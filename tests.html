@@ -327,6 +327,17 @@
         expect(r.format(0.123456)).toBe('0.12');
       });
     });
+
+    describe('shaders', () => {
+      it('vertex shader is es 3.00', async () => {
+        expect(AG().shaders.SHADER_VS.startsWith('#version 300 es')).toBe(true);
+      });
+      it('fragment shaders are non-empty', async () => {
+        expect(AG().shaders.SHADER_FS_STRIPE.length).toBeGreaterThan(50);
+        expect(AG().shaders.SHADER_FS_VIRIDIS.length).toBeGreaterThan(50);
+        expect(AG().shaders.SHADER_FS_FLAT.length).toBeGreaterThan(20);
+      });
+    });
     // === END TESTS ===
 
     run();

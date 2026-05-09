@@ -395,6 +395,52 @@ const viridisInverseTextRenderer = () => ({
 });
 
 afterglow.renderers = { textRenderer, redGreenBlackRenderer, viridisInverseTextRenderer };
+
+// §5 GLSL ES 3.00 shader sources (compiled in worker on init)
+const SHADER_VS = `#version 300 es
+precision highp float;
+in vec2 a_quad;
+in vec3 a_inst;
+uniform vec2 u_cellSize;
+uniform vec2 u_view;
+uniform vec2 u_canvasPx;
+out float v_value;
+void main() {
+  vec2 cellOrigin = vec2(a_inst.x, a_inst.y) * u_cellSize - u_view;
+  vec2 px = cellOrigin + a_quad * u_cellSize;
+  vec2 ndc = (px / u_canvasPx) * 2.0 - 1.0;
+  ndc.y *= -1.0;
+  gl_Position = vec4(ndc, 0.0, 1.0);
+  v_value = a_inst.z;
+}`;
+
+const SHADER_FS_STRIPE = `#version 300 es
+precision highp float;
+in float v_value;
+uniform vec4 u_stripeA;
+uniform vec4 u_stripeB;
+out vec4 fragColor;
+void main() {
+  float t = mod(v_value, 2.0);
+  fragColor = mix(u_stripeA, u_stripeB, step(0.5, t));
+}`;
+
+const SHADER_FS_VIRIDIS = `#version 300 es
+precision highp float;
+in float v_value;
+uniform sampler2D u_lut;
+out vec4 fragColor;
+void main() {
+  fragColor = texture(u_lut, vec2(clamp(v_value, 0.0, 1.0), 0.5));
+}`;
+
+const SHADER_FS_FLAT = `#version 300 es
+precision highp float;
+uniform vec4 u_fill;
+out vec4 fragColor;
+void main() { fragColor = u_fill; }`;
+
+afterglow.shaders = { SHADER_VS, SHADER_FS_STRIPE, SHADER_FS_VIRIDIS, SHADER_FS_FLAT };
   </script>
 </body>
 </html>
