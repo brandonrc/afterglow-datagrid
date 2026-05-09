@@ -128,6 +128,43 @@
         ch.emit('x', 1);
       });
     });
+
+    describe('RenderScheduler', () => {
+      it('runs higher priority before lower', async () => {
+        const s = new (AG().RenderScheduler)();
+        const order = [];
+        s.schedule(1, () => order.push('low'));
+        s.schedule(10, () => order.push('high'));
+        s.schedule(5, () => order.push('mid'));
+        s._drainSync();
+        expect(order).toEqual(['high', 'mid', 'low']);
+      });
+      it('dedups identical fn references', async () => {
+        const s = new (AG().RenderScheduler)();
+        let count = 0;
+        const fn = () => count++;
+        s.schedule(1, fn); s.schedule(1, fn); s.schedule(1, fn);
+        s._drainSync();
+        expect(count).toBe(1);
+      });
+      it('cancel removes pending work', async () => {
+        const s = new (AG().RenderScheduler)();
+        let count = 0;
+        const fn = () => count++;
+        s.schedule(1, fn);
+        s.cancel(fn);
+        s._drainSync();
+        expect(count).toBe(0);
+      });
+      it('a throwing fn does not stop the queue', async () => {
+        const s = new (AG().RenderScheduler)();
+        let ran = false;
+        s.schedule(1, () => { ran = true; });
+        s.schedule(2, () => { throw new Error('boom'); });
+        s._drainSync();
+        expect(ran).toBe(true);
+      });
+    });
     // === END TESTS ===
 
     run();

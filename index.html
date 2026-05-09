@@ -105,6 +105,62 @@ class EventChannel {
   }
 }
 afterglow.EventChannel = EventChannel;
+
+// §2b RenderScheduler — priority-queued single rAF loop with frame budget
+class RenderScheduler {
+  constructor({ budgetMs = 8 } = {}) {
+    this._queue = [];
+    this._fnSet = new Set();
+    this._running = false;
+    this._budgetMs = budgetMs;
+    this._raf = null;
+  }
+  schedule(priority, fn) {
+    if (this._fnSet.has(fn)) return;
+    this._fnSet.add(fn);
+    this._queue.push({ priority, fn });
+    this._kick();
+  }
+  scheduleIdle(fn) {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(fn);
+    else setTimeout(fn, 50);
+  }
+  cancel(fn) {
+    this._fnSet.delete(fn);
+    this._queue = this._queue.filter(e => e.fn !== fn);
+  }
+  _kick() {
+    if (this._raf != null) return;
+    this._raf = requestAnimationFrame((t) => this._tick(t));
+  }
+  _tick(t) {
+    this._raf = null;
+    if (!this._queue.length) return;
+    afterglow.hud?.beginFrame?.();
+    this._queue.sort((a, b) => b.priority - a.priority);
+    const start = performance.now();
+    while (this._queue.length && (performance.now() - start) < this._budgetMs) {
+      const { fn } = this._queue.shift();
+      this._fnSet.delete(fn);
+      try { fn(t); } catch (e) { console.error(e); }
+    }
+    afterglow.hud?.endFrame?.();
+    if (this._queue.length) this._kick();
+  }
+  _drainSync() {
+    this._queue.sort((a, b) => b.priority - a.priority);
+    const ran = [];
+    while (this._queue.length) {
+      const { fn } = this._queue.shift();
+      this._fnSet.delete(fn);
+      ran.push(fn);
+      try { fn(0); } catch (e) { console.error(e); }
+    }
+    return ran;
+  }
+}
+afterglow.RenderScheduler = RenderScheduler;
+afterglow.scheduler = new RenderScheduler();
   </script>
 </body>
 </html>
