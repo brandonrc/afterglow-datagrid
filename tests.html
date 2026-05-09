@@ -338,6 +338,14 @@
         expect(AG().shaders.SHADER_FS_FLAT.length).toBeGreaterThan(20);
       });
     });
+
+    describe('renderer worker', () => {
+      it('spawns and reports ready', async () => {
+        const w = await AG().spawnRendererWorker();
+        expect(typeof w.postMessage).toBe('function');
+        w.terminate();
+      });
+    });
     // === END TESTS ===
 
     run();
