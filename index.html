@@ -1065,6 +1065,11 @@ class Grid {
     });
     w.postMessage({ op: 'uploadInstances', buffer: buf.buffer, count: total }, [buf.buffer]);
     w.postMessage({ op: 'paint' });
+    if (afterglow.hud) {
+      afterglow.hud.recordDraw();
+      afterglow.hud.recordTransfer();
+      afterglow.hud.recordCells(total);
+    }
     this._dirty.fill = false;
   }
   _paintHeaders() {
@@ -1469,6 +1474,96 @@ afterglow.DropOverlay = DropOverlay;
 afterglow.TabNode = TabNode;
 afterglow.SplitNode = SplitNode;
 afterglow._findTabNodeByEl = (el) => _tabNodeRegistry.get(el);
+
+// §9 PerfHUD
+class PerfHUD {
+  constructor() {
+    this._buildDOM();
+    this._frames = [];
+    this._lastT = performance.now();
+    this._lastFrameStart = 0;
+    this._cellsLastSec = 0;
+    this._draws = 0;
+    this._transfers = 0;
+    this._updateLoop();
+  }
+  _buildDOM() {
+    this.el = document.createElement('div');
+    this.el.className = 'ag-hud';
+    this.el.innerHTML =
+      '<div class="row"><span>FPS</span><span class="v" id="hud-fps">-</span></div>' +
+      '<div class="row"><span>Frame ms</span><span class="v" id="hud-frame">-</span></div>' +
+      '<div class="row"><span>Idle</span><span class="v" id="hud-idle">-</span></div>' +
+      '<h3>Active grid</h3>' +
+      '<div class="row"><span>Cells/s</span><span class="v" id="hud-cells">-</span></div>' +
+      '<h3>Workers</h3>' +
+      '<div class="row"><span>Draws/s</span><span class="v" id="hud-draws">-</span></div>' +
+      '<div class="row"><span>Transfers/s</span><span class="v" id="hud-transfers">-</span></div>';
+    document.body.appendChild(this.el);
+    document.addEventListener('keydown', (e) => { if (e.key === '?') this.el.style.display = this.el.style.display === 'none' ? '' : 'none'; });
+  }
+  beginFrame() { this._lastFrameStart = performance.now(); }
+  endFrame() {
+    const t = performance.now();
+    const dt = t - this._lastT;
+    this._frames.push({ t, dt, busy: t - this._lastFrameStart });
+    if (this._frames.length > 120) this._frames.shift();
+    this._lastT = t;
+  }
+  recordCells(n) { this._cellsLastSec += n; }
+  recordDraw() { this._draws++; }
+  recordTransfer() { this._transfers++; }
+  _updateLoop() {
+    setInterval(() => {
+      if (this._frames.length < 2) return;
+      const dts = this._frames.map(f => f.dt);
+      const busy = this._frames.map(f => f.busy);
+      const avgDt = dts.reduce((a, b) => a + b, 0) / dts.length;
+      const avgBusy = busy.reduce((a, b) => a + b, 0) / busy.length;
+      const fps = 1000 / avgDt;
+      const idle = 1 - avgBusy / avgDt;
+      const sortedDts = dts.slice().sort((a, b) => a - b);
+      const p99 = sortedDts[Math.floor(sortedDts.length * 0.99)];
+      this.el.querySelector('#hud-fps').textContent = fps.toFixed(1);
+      this.el.querySelector('#hud-frame').textContent = avgDt.toFixed(2) + ' (p99 ' + p99.toFixed(2) + ')';
+      this.el.querySelector('#hud-idle').textContent = (Math.max(0, idle) * 100).toFixed(0) + '%';
+      this.el.querySelector('#hud-cells').textContent = this._cellsLastSec.toLocaleString();
+      this.el.querySelector('#hud-draws').textContent = this._draws;
+      this.el.querySelector('#hud-transfers').textContent = this._transfers;
+      this._cellsLastSec = 0; this._draws = 0; this._transfers = 0;
+    }, 1000);
+  }
+}
+afterglow.PerfHUD = PerfHUD;
+
+afterglow.bench = async (seconds = 5) => {
+  const grids = afterglow._allGrids || [];
+  if (!grids.length) { console.warn('afterglow: no grids registered'); return; }
+  console.log('Benching ' + grids.length + ' grids for ' + seconds + 's...');
+  const results = grids.map(g => ({ title: g.__title || '?', frames: [] }));
+  const stop = performance.now() + seconds * 1000;
+  while (performance.now() < stop) {
+    let frameStart = performance.now();
+    for (let i = 0; i < grids.length; i++) {
+      const g = grids[i];
+      g.scrollY += 20;
+      g._dirty.fill = g._dirty.text = g._dirty.overlay = true;
+      g.paint();
+      const t = performance.now();
+      results[i].frames.push(t - frameStart);
+      frameStart = t;
+    }
+    await new Promise(r => requestAnimationFrame(r));
+  }
+  for (const r of results) {
+    if (!r.frames.length) continue;
+    const sorted = r.frames.slice().sort((a, b) => a - b);
+    const avg = r.frames.reduce((a, b) => a + b, 0) / r.frames.length;
+    const p50 = sorted[Math.floor(sorted.length * 0.50)];
+    const p99 = sorted[Math.floor(sorted.length * 0.99)];
+    console.log(r.title + ': avg=' + avg.toFixed(2) + 'ms p50=' + p50.toFixed(2) + ' p99=' + p99.toFixed(2));
+  }
+};
 
 // Manual smoke
 afterglow.demoDockBasic = () => {
