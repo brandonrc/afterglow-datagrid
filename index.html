@@ -1638,6 +1638,78 @@ afterglow.demoDockBasic = () => {
   right.addTab({ title: 'Large', content: g2 });
   return root;
 };
+
+// §10 main() — wire 9 models + 9 grids into initial dock layout
+async function main() {
+  afterglow._allGrids = [];
+  afterglow.hud = new PerfHUD();
+  afterglow.mountBrandSurface();
+
+  const m1 = new LargeModel(2e12, 2e12);
+  const m2 = new StreamingModel(50);
+  const m3 = new RandomTicksModel(15, 10, 60);
+  const m4 = new RandomTicksModel(80, 80, 60);
+  const m5 = afterglow.makeCarsModel();
+  const m6 = new LargeModel(9e15, 9e15);
+  const m7 = new RandomTicksModel(200, 200, 16, { mode: 'all' });
+  const m8 = new FirehoseModel(20, 10000, 1);
+  const m9 = new SortableModel(afterglow.makeCarsModel(), { frozenRows: 2, frozenCols: 2 });
+
+  const stripeBlue  = { a: [0.54, 0.67, 0.78, 0.30], b: [0.39, 0.39, 0.39, 0.10], flat: [1,1,1,1] };
+  const stripeBrown = { a: [0.65, 0.56, 0.21, 0.20], b: [0.00, 0.00, 0.00, 0.00], flat: [1,1,1,1] };
+  const stripeGreen = { a: [0.25, 0.45, 0.21, 0.20], b: [0.00, 0.00, 0.00, 0.00], flat: [1,1,1,1] };
+
+  const g1 = new Grid({ model: m1, fillProgram: 'stripe', stripeColors: stripeBlue,  style: BLUE_STRIPE_STYLE });
+  const g2 = new Grid({ model: m2, fillProgram: 'stripe', stripeColors: stripeBrown, style: BROWN_STRIPE_STYLE, selectionMode: 'column' });
+  const g3 = new Grid({ model: m3, fillProgram: 'flat',   renderer: redGreenBlackRenderer() });
+  const g4 = new Grid({ model: m4, fillProgram: 'viridis', renderer: viridisInverseTextRenderer(), style: LIGHT_SELECTION_STYLE });
+  const g5 = new Grid({ model: m5, fillProgram: 'stripe', stripeColors: stripeGreen, style: GREEN_STRIPE_STYLE, selectionMode: 'row',
+                        rowHeight: 32, colWidth: 128, rowHeaderWidth: 64, colHeaderHeight: 32 });
+  const g6 = new Grid({ model: m6, fillProgram: 'stripe', stripeColors: stripeBlue,  style: BLUE_STRIPE_STYLE });
+  const g7 = new Grid({ model: m7, fillProgram: 'viridis', renderer: viridisInverseTextRenderer(), style: LIGHT_SELECTION_STYLE });
+  const g8 = new Grid({ model: m8, fillProgram: 'flat',   renderer: redGreenBlackRenderer() });
+  const g9 = new Grid({ model: m9, fillProgram: 'stripe', stripeColors: stripeGreen, style: GREEN_STRIPE_STYLE, sortable: true });
+
+  const grids = [g1, g2, g3, g4, g5, g6, g7, g8, g9];
+  const titles = [
+    'Two Trillion Rows/Cols', 'Streaming Rows', 'Random Ticks 1', 'Random Ticks 2',
+    'JSON Data', '9 Quadrillion', '200×200 Heatmap', '10K Stream @ 1ms', 'Frozen + Sortable'
+  ];
+  grids.forEach((g, i) => { g.__title = titles[i]; afterglow._allGrids.push(g); });
+
+  const tn1 = new TabNode(); tn1.addTab({ title: titles[0], content: g1 }); tn1.addTab({ title: titles[5], content: g6 });
+  const tn2 = new TabNode(); tn2.addTab({ title: titles[2], content: g3 });
+  const tn3 = new TabNode(); tn3.addTab({ title: titles[1], content: g2 }); tn3.addTab({ title: titles[7], content: g8 });
+  const tn4 = new TabNode(); tn4.addTab({ title: titles[3], content: g4 }); tn4.addTab({ title: titles[6], content: g7 });
+  const tn5 = new TabNode(); tn5.addTab({ title: titles[4], content: g5 }); tn5.addTab({ title: titles[8], content: g9 });
+
+  const leftCol  = new SplitNode('v'); leftCol.addChild(tn1); leftCol.addChild(tn2);
+  const rightCol = new SplitNode('v'); rightCol.addChild(tn3); rightCol.addChild(tn4); rightCol.addChild(tn5);
+  const root = new SplitNode('h'); root.addChild(leftCol); root.addChild(rightCol);
+
+  const appEl = document.getElementById('app');
+  appEl.appendChild(root.el);
+  afterglow.root = root;
+
+  new ResizeObserver(() => root._propagateResize()).observe(appEl);
+  requestAnimationFrame(() => {
+    root._propagateResize();
+    requestAnimationFrame(() => root._propagateResize());
+  });
+
+  for (const g of grids) {
+    const schedulePaint = () => afterglow.scheduler.schedule(8, () => g.paint());
+    g.model.on('cells-changed', schedulePaint);
+    g.model.on('rows-inserted', schedulePaint);
+    g.model.on('rows-removed', schedulePaint);
+    g.model.on('reset', schedulePaint);
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  document.body.innerHTML = '<pre style="padding:16px;color:#f87171;font-family:ui-monospace,monospace;white-space:pre-wrap;">' + (err && err.stack || err) + '</pre>';
+});
   </script>
 </body>
 </html>
