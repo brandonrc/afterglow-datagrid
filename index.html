@@ -679,11 +679,12 @@ class TileCache {
     let t = this._tiles.get(k);
     if (!t) {
       const canvas = new OffscreenCanvas(this._tileSize, this._tileSize);
-      t = { canvas, ctx: canvas.getContext('2d'), dirty: true, lru: 0 };
+      t = { canvas, ctx: canvas.getContext('2d'), dirty: true, lru: ++this._lruClock };
       this._tiles.set(k, t);
       this._evict();
+    } else {
+      t.lru = ++this._lruClock;
     }
-    t.lru = ++this._lruClock;
     return t;
   }
   markDirtyRect(pxX, pxY, pxW, pxH) {
@@ -1304,10 +1305,13 @@ class SplitNode {
   addChild(node, size) {
     node.parent = this;
     this.children.push(node);
-    if (size != null) this.sizes.push(size);
-    else this.sizes.push(1 / this.children.length);
-    const sum = this.sizes.reduce((a, b) => a + b, 0);
-    this.sizes = this.sizes.map(s => s / sum);
+    if (size != null) {
+      this.sizes.push(size);
+      const sum = this.sizes.reduce((a, b) => a + b, 0);
+      this.sizes = this.sizes.map(s => s / sum);
+    } else {
+      this.sizes = this.children.map(() => 1 / this.children.length);
+    }
     this._render();
   }
   _render() {
