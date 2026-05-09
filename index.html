@@ -839,14 +839,15 @@ const SHADER_VS = `#version 300 es
 precision highp float;
 in vec2 a_quad;
 in vec3 a_inst;
-uniform vec2 u_cellSize;
-uniform vec2 u_view;
-uniform vec2 u_canvasPx;
+uniform vec2 u_cellSize;   // CSS pixels
+uniform vec2 u_view;       // CSS pixels
+uniform vec2 u_canvasPx;   // physical (backing-store) pixels
+uniform float u_dpr;       // physical / CSS
 out float v_value;
 void main() {
   vec2 cellOrigin = vec2(a_inst.x, a_inst.y) * u_cellSize - u_view;
-  vec2 px = cellOrigin + a_quad * u_cellSize;
-  vec2 ndc = (px / u_canvasPx) * 2.0 - 1.0;
+  vec2 cssPx = cellOrigin + a_quad * u_cellSize;
+  vec2 ndc = (cssPx * u_dpr / u_canvasPx) * 2.0 - 1.0;
   ndc.y *= -1.0;
   gl_Position = vec4(ndc, 0.0, 1.0);
   v_value = a_inst.z;
@@ -975,6 +976,7 @@ function paint() {
   gl.uniform2f(gl.getUniformLocation(prog, 'u_cellSize'), cellSize[0], cellSize[1]);
   gl.uniform2f(gl.getUniformLocation(prog, 'u_view'), view[0], view[1]);
   gl.uniform2f(gl.getUniformLocation(prog, 'u_canvasPx'), canvas.width, canvas.height);
+  gl.uniform1f(gl.getUniformLocation(prog, 'u_dpr'), dpr);
   if (activeProgram === 'stripe') {
     gl.uniform4fv(gl.getUniformLocation(prog, 'u_stripeA'), stripeA);
     gl.uniform4fv(gl.getUniformLocation(prog, 'u_stripeB'), stripeB);
@@ -1242,12 +1244,55 @@ class Grid {
       else { this.vScrollEl.scrollTop += e.deltaY; this.hScrollEl.scrollLeft += e.deltaX; }
     }, { passive: false });
 
+    this.el.addEventListener('pointermove', (ev) => {
+      if (this._dragSelectAnchor || this._resizeAnchor) return;
+      const rect = this.el.getBoundingClientRect();
+      const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+      const edge = this._hitResizeEdge(px, py);
+      this.el.style.cursor = edge ? (edge.kind === 'col' ? 'col-resize' : 'row-resize') : '';
+    });
+
     this.el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       if (e.target === this.vScrollEl || e.target === this.hScrollEl || e.target === this.vScrollInner || e.target === this.hScrollInner) return;
       this.el.focus();
       const rect = this.el.getBoundingClientRect();
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
+
+      const edge = this._hitResizeEdge(px, py);
+      if (edge) {
+        e.preventDefault();
+        try { this.el.setPointerCapture(e.pointerId); } catch {}
+        this._resizeAnchor = { kind: edge.kind, startPx: edge.kind === 'col' ? px : py, startSize: edge.kind === 'col' ? this.colWidth : this.rowHeight, edgeIndex: edge.index };
+        const move = (ev) => {
+          if (!this._resizeAnchor) return;
+          const r2 = this.el.getBoundingClientRect();
+          const cur = this._resizeAnchor.kind === 'col' ? (ev.clientX - r2.left) : (ev.clientY - r2.top);
+          const delta = cur - this._resizeAnchor.startPx;
+          const slots = this._resizeAnchor.edgeIndex + 1;
+          const newSize = Math.max(20, Math.min(800, this._resizeAnchor.startSize + delta / slots));
+          if (this._resizeAnchor.kind === 'col') this.colWidth = newSize; else this.rowHeight = newSize;
+          this._textCache.invalidateAll();
+          this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
+          afterglow.scheduler.schedule(8, this._paintBound);
+        };
+        const up = (ev) => {
+          this._resizeAnchor = null;
+          this.el.removeEventListener('pointermove', move);
+          this.el.removeEventListener('pointerup', up);
+          try { this.el.releasePointerCapture(e.pointerId); } catch {}
+          this.el.style.cursor = '';
+          // Update scrollbar inner sizes after final size change
+          const totalH = Math.min(33000000, this.model.rowCount('body') * this.rowHeight);
+          const totalW = Math.min(33000000, this.model.columnCount('body') * this.colWidth);
+          if (this.vScrollInner) this.vScrollInner.style.height = totalH + 'px';
+          if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
+        };
+        this.el.addEventListener('pointermove', move);
+        this.el.addEventListener('pointerup', up);
+        return;
+      }
+
       const hit = Geometry.hitTest(px, py, {
         rowHeaderWidth: this.rowHeaderWidth, colHeaderHeight: this.colHeaderHeight,
         rowHeight: this.rowHeight, colWidth: this.colWidth,
@@ -1322,6 +1367,27 @@ class Grid {
       this._dirty.overlay = true;
       afterglow.scheduler.schedule(8, this._paintBound);
     });
+  }
+  _hitResizeEdge(px, py) {
+    // Column-edge: pointer is in column-header band, within 4px of any visible column boundary.
+    if (py < this.colHeaderHeight && px >= this.rowHeaderWidth) {
+      const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
+      const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, this.model.columnCount('body'));
+      for (let c = c0; c <= c1 + 1; c++) {
+        const edgeX = this.rowHeaderWidth + (c + 1) * this.colWidth - this.scrollX;
+        if (Math.abs(px - edgeX) <= 4) return { kind: 'col', index: c };
+      }
+    }
+    // Row-edge: pointer is in row-header band, within 4px of any visible row boundary.
+    if (px < this.rowHeaderWidth && py >= this.colHeaderHeight) {
+      const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
+      const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, this.model.rowCount('body'));
+      for (let r = r0; r <= r1 + 1; r++) {
+        const edgeY = this.colHeaderHeight + (r + 1) * this.rowHeight - this.scrollY;
+        if (Math.abs(py - edgeY) <= 4) return { kind: 'row', index: r };
+      }
+    }
+    return null;
   }
   _wireModel() {
     this._unsubs.push(this.model.on('cells-changed', (e) => {
@@ -1627,6 +1693,20 @@ class TabNode {
     this.contentEl.className = 'ag-tab-content';
     this.el.appendChild(this.strip);
     this.el.appendChild(this.contentEl);
+    // Resize the active grid whenever the content area's box changes — covers
+    // tab switches, splitter drags, and window resizes uniformly.
+    this._resizeObs = new ResizeObserver(() => this._fitActive());
+    this._resizeObs.observe(this.contentEl);
+  }
+  _fitActive() {
+    const tab = this.tabs[this.activeIndex];
+    if (!tab || !tab.content) return;
+    const c = tab.content;
+    if (typeof c.resize !== 'function') return;
+    const r = this.contentEl.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    c.resize(r.width, r.height);
+    if (typeof c.paint === 'function') c.paint();
   }
   addTab(tab) {
     this.tabs.push(tab);
@@ -1657,14 +1737,10 @@ class TabNode {
     });
     if (this.tabs[this.activeIndex]) {
       this.contentEl.appendChild(this.tabs[this.activeIndex].content.el);
-      requestAnimationFrame(() => {
-        const r = this.contentEl.getBoundingClientRect();
-        const c = this.tabs[this.activeIndex].content;
-        if (c && typeof c.resize === 'function') {
-          c.resize(r.width, r.height);
-          if (typeof c.paint === 'function') c.paint();
-        }
-      });
+      // Force a resize+paint immediately, then once more after layout flushes,
+      // so the canvases pick up real bounds even on the first activation.
+      this._fitActive();
+      requestAnimationFrame(() => this._fitActive());
     }
   }
   _wireTab(tEl, tab, i) {
