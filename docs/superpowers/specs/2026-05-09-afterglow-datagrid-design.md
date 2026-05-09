@@ -167,6 +167,26 @@ SplitNode(h)
 ```
 Every leaf is a `TabNode`; single-tab nodes still show their tab strip (so the tab is grabbable). This matches Phosphor's behavior where every panel is technically a tabbed container.
 
+### 6b. Brand & polish surface
+
+The spec above is silent on visual identity. To make this *land* as Afterglow rather than as a Phosphor reskin, three small decisions:
+
+**Wordmark.** A small `Afterglow` wordmark in the top-left of the dock chrome, in a tracked-out semi-bold sans-serif. Subtitle on hover: `phosphor faded.` A subtle radial gradient behind the wordmark — a faint magenta→cyan glow that fades to transparent — sells the "afterglow" metaphor without becoming chrome the user has to look at all day.
+
+**Tab strip styling.** Phosphor's tab strip is a flat 24px gray bar with a 1px bottom border and zero personality. Afterglow's tab strip is the same height and same information density, but: active tab has a 2px top accent bar in the brand magenta; inactive tabs are the same flat gray; hovered tabs get a 1-frame-easing background tint. Cost: ~10 lines of CSS, zero perf.
+
+**Drop-zone overlay.** Phosphor's drop zones are translucent blue squares. Afterglow's are translucent magenta with a 2px dashed border that animates on dragenter (1 keyframe pulse, 200ms). The center "merge into tabs" zone shows a small label `merge`; edge zones show `split →`, `split ↓`, etc. Functional clarity + visible polish.
+
+**Drag-to-dock overlay** also gets a `kbd` shortcut hint in the corner during drag: <code>esc to cancel</code>. (Phosphor doesn't support cancel; we do.)
+
+These four touches are the entire visual brand. Implementation cost: ~30 lines of CSS in the inline style block. Color tokens declared once at the top:
+```
+--afterglow-brand: #d946ef;     /* magenta */
+--afterglow-glow:  #06b6d4;     /* cyan */
+--afterglow-bg:    #0b0d11;     /* near-black for HUD */
+--afterglow-fg:    #e6e8ec;     /* HUD text */
+```
+
 ### 7. PerfHUD
 
 Fixed top-right overlay. Toggle with `?` key or a small button. Two columns:
