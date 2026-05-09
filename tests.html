@@ -346,6 +346,18 @@
         w.terminate();
       });
     });
+
+    describe('worker WebGL smoke test', () => {
+      it('demoWorker spawns and runs without errors', async () => {
+        const { worker, canvas } = await AG().demoWorker();
+        let err = null;
+        worker.addEventListener('message', (e) => { if (e.data && e.data.op === 'error') err = e.data.message; });
+        await new Promise(r => setTimeout(r, 250));
+        expect(err === null).toBe(true);
+        worker.terminate();
+        canvas.remove();
+      });
+    });
     // === END TESTS ===
 
     run();

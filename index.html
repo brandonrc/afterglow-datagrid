@@ -595,6 +595,34 @@ async function spawnRendererWorker() {
   return worker;
 }
 afterglow.spawnRendererWorker = spawnRendererWorker;
+
+// §6b Smoke demo — call afterglow.demoWorker() in console to see a striped grid
+afterglow.demoWorker = async () => {
+  const c = document.createElement('canvas');
+  c.width = 400; c.height = 300;
+  c.style.cssText = 'position:fixed;top:8px;left:8px;border:1px solid #d946ef;background:black;z-index:9999;';
+  document.body.appendChild(c);
+  const off = c.transferControlToOffscreen();
+  const w = await spawnRendererWorker();
+  w.postMessage({
+    op: 'init',
+    offscreenCanvas: off,
+    shaders: { vs: SHADER_VS, stripe: SHADER_FS_STRIPE, viridis: SHADER_FS_VIRIDIS, flat: SHADER_FS_FLAT },
+    lut: VIRIDIS_LUT_256.buffer.slice(0),
+    dprIn: window.devicePixelRatio
+  }, [off]);
+  w.postMessage({ op: 'resize', cssW: 400, cssH: 300, dprIn: window.devicePixelRatio });
+  w.postMessage({ op: 'setStyle', activeProgram: 'stripe', cellSize: [40, 20], stripeA: [0.85,0.27,0.94,1], stripeB: [0.02,0.71,0.83,1] });
+  w.postMessage({ op: 'setView', scrollX: 0, scrollY: 0 });
+  const inst = new Float32Array(10 * 15 * 3);
+  let idx = 0;
+  for (let r = 0; r < 15; r++) for (let cc = 0; cc < 10; cc++) {
+    inst[idx++] = cc; inst[idx++] = r; inst[idx++] = (cc + r) % 2;
+  }
+  w.postMessage({ op: 'uploadInstances', buffer: inst.buffer, count: 10*15 }, [inst.buffer]);
+  w.postMessage({ op: 'paint' });
+  return { worker: w, canvas: c };
+};
   </script>
 </body>
 </html>
