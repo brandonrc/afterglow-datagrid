@@ -673,6 +673,33 @@ class TileCache {
   }
 }
 afterglow.TileCache = TileCache;
+
+// §7b Grid geometry helpers (pure functions for testability)
+const Geometry = {
+  firstVisibleRow(scrollY, rowHeight) { return Math.max(0, Math.floor(scrollY / rowHeight)); },
+  lastVisibleRow(scrollY, rowHeight, viewHeight, totalRows) {
+    return Math.min(totalRows - 1, Math.floor((scrollY + viewHeight - 1) / rowHeight));
+  },
+  firstVisibleCol(scrollX, colWidth) { return Math.max(0, Math.floor(scrollX / colWidth)); },
+  lastVisibleCol(scrollX, colWidth, viewWidth, totalCols) {
+    return Math.min(totalCols - 1, Math.floor((scrollX + viewWidth - 1) / colWidth));
+  },
+  hitTest(px, py, geom) {
+    if (px < geom.rowHeaderWidth && py < geom.colHeaderHeight) return { region: 'corner-header' };
+    if (px < geom.rowHeaderWidth) {
+      const row = Math.floor((py - geom.colHeaderHeight + geom.scrollY) / geom.rowHeight);
+      return { region: 'row-header', row };
+    }
+    if (py < geom.colHeaderHeight) {
+      const col = Math.floor((px - geom.rowHeaderWidth + geom.scrollX) / geom.colWidth);
+      return { region: 'column-header', col };
+    }
+    const row = Math.floor((py - geom.colHeaderHeight + geom.scrollY) / geom.rowHeight);
+    const col = Math.floor((px - geom.rowHeaderWidth + geom.scrollX) / geom.colWidth);
+    return { region: 'body', row, col };
+  }
+};
+afterglow.Geometry = Geometry;
   </script>
 </body>
 </html>
