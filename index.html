@@ -805,33 +805,48 @@ class Grid {
   }
   paintText() {
     const ctx = this._textCtx;
+    const ts = 256;
+    ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+    const viewW = Math.max(0, this.cssWidth - this.rowHeaderWidth);
+    const viewH = Math.max(0, this.cssHeight - this.colHeaderHeight);
+    this._textCache.forEachVisible(this.scrollX, this.scrollY, viewW, viewH, (tx, ty, tile) => {
+      if (tile.dirty) this._renderTile(tx, ty, tile);
+      const dx = this.rowHeaderWidth + (tx * ts - this.scrollX);
+      const dy = this.colHeaderHeight + (ty * ts - this.scrollY);
+      ctx.drawImage(tile.canvas, dx, dy);
+    });
+    this._paintHeaders();
+    this._dirty.text = false;
+  }
+  _renderTile(tx, ty, tile) {
+    const ts = 256;
+    const tCtx = tile.ctx;
+    tCtx.clearRect(0, 0, ts, ts);
     const m = this.model;
     const r = this.renderer;
-    ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
-    const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
-    const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, m.rowCount('body'));
-    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
-    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, m.columnCount('body'));
-    ctx.font = typeof r.font === 'string' ? r.font : '12px ui-sans-serif, sans-serif';
-    ctx.textBaseline = 'middle';
+    tCtx.font = typeof r.font === 'string' ? r.font : '12px ui-sans-serif, sans-serif';
+    tCtx.textBaseline = 'middle';
+    const r0 = Math.max(0, Math.floor((ty * ts) / this.rowHeight));
+    const r1 = Math.min(m.rowCount('body') - 1, Math.floor(((ty + 1) * ts - 1) / this.rowHeight));
+    const c0 = Math.max(0, Math.floor((tx * ts) / this.colWidth));
+    const c1 = Math.min(m.columnCount('body') - 1, Math.floor(((tx + 1) * ts - 1) / this.colWidth));
     for (let row = r0; row <= r1; row++) {
       for (let col = c0; col <= c1; col++) {
         const v = m.data('body', row, col);
         const text = typeof r.format === 'function' ? r.format(v) : String(v);
         const color = typeof r.color === 'function' ? r.color(v) : r.color;
-        ctx.fillStyle = color;
-        const x = this.rowHeaderWidth + col * this.colWidth - this.scrollX;
-        const y = this.colHeaderHeight + row * this.rowHeight - this.scrollY + this.rowHeight / 2;
+        tCtx.fillStyle = color;
+        const x = col * this.colWidth - tx * ts;
+        const y = row * this.rowHeight - ty * ts + this.rowHeight / 2;
         const align = r.align || 'left';
-        ctx.textAlign = align;
-        let tx = x + 4;
-        if (align === 'right') tx = x + this.colWidth - 4;
-        else if (align === 'center') tx = x + this.colWidth / 2;
-        ctx.fillText(text, tx, y);
+        tCtx.textAlign = align;
+        let dx = x + 4;
+        if (align === 'right') dx = x + this.colWidth - 4;
+        else if (align === 'center') dx = x + this.colWidth / 2;
+        tCtx.fillText(text, dx, y);
       }
     }
-    this._paintHeaders();
-    this._dirty.text = false;
+    tile.dirty = false;
   }
   _paintHeaders() {
     const ctx = this._textCtx;
