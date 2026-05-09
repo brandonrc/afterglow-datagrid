@@ -623,6 +623,56 @@ afterglow.demoWorker = async () => {
   w.postMessage({ op: 'paint' });
   return { worker: w, canvas: c };
 };
+
+// §7a TileCache — 256×256 px tiles, lazy allocation, LRU eviction
+class TileCache {
+  constructor({ tileSize = 256, maxTiles = 64 } = {}) {
+    this._tileSize = tileSize;
+    this._maxTiles = maxTiles;
+    this._tiles = new Map();
+    this._lruClock = 0;
+  }
+  _key(tx, ty) { return tx + ',' + ty; }
+  _evict() {
+    while (this._tiles.size > this._maxTiles) {
+      let oldestKey = null, oldestLru = Infinity;
+      for (const [k, t] of this._tiles) if (t.lru < oldestLru) { oldestLru = t.lru; oldestKey = k; }
+      if (oldestKey) this._tiles.delete(oldestKey); else break;
+    }
+  }
+  get(tx, ty) {
+    const k = this._key(tx, ty);
+    let t = this._tiles.get(k);
+    if (!t) {
+      const canvas = new OffscreenCanvas(this._tileSize, this._tileSize);
+      t = { canvas, ctx: canvas.getContext('2d'), dirty: true, lru: 0 };
+      this._tiles.set(k, t);
+      this._evict();
+    }
+    t.lru = ++this._lruClock;
+    return t;
+  }
+  markDirtyRect(pxX, pxY, pxW, pxH) {
+    const ts = this._tileSize;
+    const x0 = Math.floor(pxX / ts), y0 = Math.floor(pxY / ts);
+    const x1 = Math.floor((pxX + pxW - 1) / ts), y1 = Math.floor((pxY + pxH - 1) / ts);
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+      const k = this._key(tx, ty);
+      const t = this._tiles.get(k);
+      if (t) t.dirty = true;
+    }
+  }
+  invalidateAll() { for (const t of this._tiles.values()) t.dirty = true; }
+  forEachVisible(viewX, viewY, viewW, viewH, fn) {
+    const ts = this._tileSize;
+    const x0 = Math.floor(viewX / ts), y0 = Math.floor(viewY / ts);
+    const x1 = Math.floor((viewX + viewW - 1) / ts), y1 = Math.floor((viewY + viewH - 1) / ts);
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+      fn(tx, ty, this.get(tx, ty));
+    }
+  }
+}
+afterglow.TileCache = TileCache;
   </script>
 </body>
 </html>

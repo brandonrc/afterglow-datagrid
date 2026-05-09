@@ -358,6 +358,42 @@
         canvas.remove();
       });
     });
+    describe('TileCache', () => {
+      it('lazy-allocates a tile on get', async () => {
+        const tc = new (AG().TileCache)();
+        const t = tc.get(0, 0);
+        expect(t.dirty).toBe(true);
+        expect(t.canvas.width).toBe(256);
+      });
+      it('returns same object for same coordinates', async () => {
+        const tc = new (AG().TileCache)();
+        const a = tc.get(2, 3); const b = tc.get(2, 3);
+        expect(a).toBe(b);
+      });
+      it('markDirtyRect marks intersecting tiles', async () => {
+        const tc = new (AG().TileCache)();
+        tc.get(0, 0); tc.get(1, 0); tc.get(2, 0);
+        tc._tiles.get('0,0').dirty = false;
+        tc._tiles.get('1,0').dirty = false;
+        tc._tiles.get('2,0').dirty = false;
+        tc.markDirtyRect(300, 50, 50, 50);
+        expect(tc._tiles.get('0,0').dirty).toBe(false);
+        expect(tc._tiles.get('1,0').dirty).toBe(true);
+        expect(tc._tiles.get('2,0').dirty).toBe(false);
+      });
+      it('LRU evicts oldest tile beyond cap', async () => {
+        const tc = new (AG().TileCache)({ maxTiles: 2 });
+        tc.get(0, 0); tc.get(1, 0); tc.get(2, 0);
+        expect(tc._tiles.size).toBe(2);
+        expect(tc._tiles.has('0,0')).toBe(false);
+      });
+      it('forEachVisible iterates expected count of tiles', async () => {
+        const tc = new (AG().TileCache)();
+        let count = 0;
+        tc.forEachVisible(0, 0, 600, 300, () => count++);
+        expect(count).toBe(6);
+      });
+    });
     // === END TESTS ===
 
     run();
