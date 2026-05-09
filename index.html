@@ -161,6 +161,35 @@ class RenderScheduler {
 }
 afterglow.RenderScheduler = RenderScheduler;
 afterglow.scheduler = new RenderScheduler();
+
+// §3 DataModel base + concrete models
+class DataModel {
+  constructor() { this.events = new EventChannel(); }
+  rowCount(region) { throw new Error('abstract'); }
+  columnCount(region) { throw new Error('abstract'); }
+  data(region, row, col) { throw new Error('abstract'); }
+  on(type, fn) { return this.events.on(type, fn); }
+  emit(type, payload) { this.events.emit(type, payload); }
+}
+
+class LargeModel extends DataModel {
+  constructor(rowCount, colCount) {
+    super();
+    this._rows = rowCount;
+    this._cols = colCount;
+  }
+  rowCount(region) { return region === 'body' ? this._rows : 1; }
+  columnCount(region) { return region === 'body' ? this._cols : 1; }
+  data(region, row, col) {
+    if (region === 'row-header') return `R: ${row}, ${col}`;
+    if (region === 'column-header') return `C: ${row}, ${col}`;
+    if (region === 'corner-header') return `N: ${row}, ${col}`;
+    return `(${row}, ${col})`;
+  }
+}
+
+afterglow.DataModel = DataModel;
+afterglow.LargeModel = LargeModel;
   </script>
 </body>
 </html>

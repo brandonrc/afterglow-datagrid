@@ -165,6 +165,31 @@
         expect(ran).toBe(true);
       });
     });
+
+    describe('LargeModel', () => {
+      it('rowCount/columnCount return constructor values for body', async () => {
+        const m = new (AG().LargeModel)(2e12, 2e12);
+        expect(m.rowCount('body')).toBe(2e12);
+        expect(m.columnCount('body')).toBe(2e12);
+      });
+      it('headers return 1 for row/column count', async () => {
+        const m = new (AG().LargeModel)(100, 50);
+        expect(m.rowCount('column-header')).toBe(1);
+        expect(m.columnCount('row-header')).toBe(1);
+      });
+      it('body cell returns parenthesized coords', async () => {
+        const m = new (AG().LargeModel)(10, 10);
+        expect(m.data('body', 5, 7)).toBe('(5, 7)');
+      });
+      it('row-header returns formatted index', async () => {
+        const m = new (AG().LargeModel)(10, 10);
+        expect(m.data('row-header', 3, 0)).toBe('R: 3, 0');
+      });
+      it('handles MAX_SAFE_INTEGER row counts', async () => {
+        const m = new (AG().LargeModel)(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+        expect(m.rowCount('body')).toBe(Number.MAX_SAFE_INTEGER);
+      });
+    });
     // === END TESTS ===
 
     run();
