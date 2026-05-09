@@ -1194,6 +1194,7 @@ class TabNode {
       t.className = 'ag-tab' + (i === this.activeIndex ? ' active' : '');
       t.textContent = tab.title;
       t.dataset.tabIndex = i;
+      this._wireTab(t, tab, i);
       this.strip.appendChild(t);
     });
     if (this.tabs[this.activeIndex]) {
@@ -1207,6 +1208,30 @@ class TabNode {
         }
       });
     }
+  }
+  _wireTab(tEl, tab, i) {
+    tEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      this.setActive(i);
+      const downX = e.clientX, downY = e.clientY;
+      let dragging = false;
+      try { tEl.setPointerCapture(e.pointerId); } catch {}
+      const move = (ev) => {
+        if (!dragging && (Math.abs(ev.clientX - downX) > 5 || Math.abs(ev.clientY - downY) > 5)) {
+          dragging = true;
+          DropOverlay.start(tab, this);
+        }
+        if (dragging) DropOverlay.update(ev.clientX, ev.clientY);
+      };
+      const up = (ev) => {
+        try { tEl.releasePointerCapture(e.pointerId); } catch {}
+        tEl.removeEventListener('pointermove', move);
+        tEl.removeEventListener('pointerup', up);
+        if (dragging) DropOverlay.end(ev.clientX, ev.clientY);
+      };
+      tEl.addEventListener('pointermove', move);
+      tEl.addEventListener('pointerup', up);
+    });
   }
 }
 
@@ -1297,6 +1322,149 @@ class SplitNode {
     });
   }
 }
+
+const DropOverlay = {
+  el: null,
+  zones: [],
+  draggingTab: null,
+  fromNode: null,
+  active: null,
+  _escHandler: null,
+  start(tab, fromNode) {
+    this.draggingTab = tab; this.fromNode = fromNode;
+    this.el = document.createElement('div');
+    this.el.className = 'ag-drop-overlay';
+    document.body.appendChild(this.el);
+    const hint = document.createElement('div');
+    hint.className = 'ag-drag-hint';
+    hint.innerHTML = 'drag to dock zone &middot; <kbd>esc</kbd> to cancel';
+    document.body.appendChild(hint);
+    this._hint = hint;
+    this._buildZones();
+    this._escHandler = (e) => {
+      if (e.key === 'Escape') {
+        this._cleanup();
+      }
+    };
+    document.addEventListener('keydown', this._escHandler);
+  },
+  _buildZones() {
+    this.zones = [];
+    const tabNodes = document.querySelectorAll('.ag-tab-node');
+    for (const node of tabNodes) {
+      const r = node.getBoundingClientRect();
+      const w = r.width, h = r.height, cx = r.left + w/2, cy = r.top + h/2;
+      const sz = Math.min(w, h) * 0.18;
+      const zonesDef = [
+        { kind: 'center', x: cx - sz, y: cy - sz, w: sz*2, h: sz*2, label: 'merge', node },
+        { kind: 'top', x: cx - sz, y: r.top + 8, w: sz*2, h: sz, label: 'split top', node },
+        { kind: 'bottom', x: cx - sz, y: r.bottom - sz - 8, w: sz*2, h: sz, label: 'split bottom', node },
+        { kind: 'left', x: r.left + 8, y: cy - sz, w: sz, h: sz*2, label: 'split left', node },
+        { kind: 'right', x: r.right - sz - 8, y: cy - sz, w: sz, h: sz*2, label: 'split right', node }
+      ];
+      for (const z of zonesDef) {
+        const el = document.createElement('div');
+        el.className = 'ag-drop-zone';
+        el.style.left = z.x + 'px'; el.style.top = z.y + 'px';
+        el.style.width = z.w + 'px'; el.style.height = z.h + 'px';
+        el.textContent = z.label;
+        this.el.appendChild(el);
+        this.zones.push(Object.assign({}, z, { el }));
+      }
+    }
+  },
+  update(x, y) {
+    let hover = null;
+    for (const z of this.zones) {
+      if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) hover = z;
+    }
+    if (hover !== this.active) {
+      if (this.active) this.active.el.classList.remove('hover');
+      if (hover) hover.el.classList.add('hover');
+      this.active = hover;
+    }
+  },
+  end(x, y) {
+    this.update(x, y);
+    if (this.active) this._performDrop(this.active);
+    this._cleanup();
+  },
+  _performDrop(zone) {
+    const targetTabNode = afterglow._findTabNodeByEl(zone.node);
+    if (!targetTabNode) return;
+    const tab = this.draggingTab;
+    const fromNode = this.fromNode;
+    if (zone.kind === 'center') {
+      if (targetTabNode === fromNode) return;
+      fromNode.removeTab(tab);
+      targetTabNode.addTab(tab);
+    } else {
+      fromNode.removeTab(tab);
+      const newNode = new TabNode();
+      newNode.addTab(tab);
+      this._splitInto(targetTabNode, newNode, zone.kind);
+    }
+    if (fromNode.tabs.length === 0) this._collapse(fromNode);
+  },
+  _splitInto(target, newNode, dir) {
+    const orientation = (dir === 'left' || dir === 'right') ? 'h' : 'v';
+    const before = (dir === 'left' || dir === 'top');
+    const parent = target.parent;
+    const split = new SplitNode(orientation);
+    if (before) { split.children = [newNode, target]; }
+    else        { split.children = [target, newNode]; }
+    split.children.forEach(c => c.parent = split);
+    split.sizes = [0.5, 0.5];
+    if (parent) {
+      const idx = parent.children.indexOf(target);
+      parent.children[idx] = split;
+      split.parent = parent;
+      parent._render();
+    } else {
+      const mount = target.el.parentElement;
+      if (mount) {
+        mount.innerHTML = '';
+        mount.appendChild(split.el);
+        split._render();
+      }
+    }
+  },
+  _collapse(emptyNode) {
+    const parent = emptyNode.parent;
+    if (!parent) return;
+    parent.children = parent.children.filter(c => c !== emptyNode);
+    parent.sizes = parent.children.map(() => 1 / Math.max(1, parent.children.length));
+    if (parent.children.length === 1) {
+      const only = parent.children[0];
+      const gp = parent.parent;
+      if (gp) {
+        const idx = gp.children.indexOf(parent);
+        gp.children[idx] = only;
+        only.parent = gp;
+        gp._render();
+      } else {
+        const mount = parent.el.parentElement;
+        if (mount) {
+          mount.innerHTML = '';
+          mount.appendChild(only.el);
+          only.parent = null;
+        }
+      }
+    } else {
+      parent._render();
+    }
+  },
+  _cleanup() {
+    if (this.el) { this.el.remove(); this.el = null; }
+    if (this._hint) { this._hint.remove(); this._hint = null; }
+    if (this._escHandler) { document.removeEventListener('keydown', this._escHandler); this._escHandler = null; }
+    this.zones = [];
+    this.active = null;
+    this.draggingTab = null;
+    this.fromNode = null;
+  }
+};
+afterglow.DropOverlay = DropOverlay;
 
 afterglow.TabNode = TabNode;
 afterglow.SplitNode = SplitNode;
