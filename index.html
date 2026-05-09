@@ -323,6 +323,34 @@ class StreamingModel extends DataModel {
   }
 }
 afterglow.StreamingModel = StreamingModel;
+
+class FirehoseModel extends DataModel {
+  constructor(colCount, rowCount, intervalMs) {
+    super();
+    this._rows = rowCount;
+    this._cols = colCount;
+    this._buf = new Float32Array(rowCount * colCount);
+    for (let i = 0; i < this._buf.length; i++) this._buf[i] = Math.random();
+    this._timer = setInterval(() => this._tick(), intervalMs);
+  }
+  destroy() { clearInterval(this._timer); }
+  rowCount(region) { return region === 'body' ? this._rows : 1; }
+  columnCount(region) { return region === 'body' ? this._cols : 1; }
+  data(region, row, col) {
+    if (region === 'row-header') return `R: ${row}, ${col}`;
+    if (region === 'column-header') return `C: ${row}, ${col}`;
+    if (region === 'corner-header') return `N: ${row}, ${col}`;
+    return this._buf[row * this._cols + col];
+  }
+  getValueBuffer() { return this._buf; }
+  _tick() {
+    const r = Math.floor(Math.random() * this._rows);
+    const base = r * this._cols;
+    for (let c = 0; c < this._cols; c++) this._buf[base + c] = Math.random();
+    this.emit('cells-changed', { region: 'body', row: r, col: 0, rowSpan: 1, colSpan: this._cols });
+  }
+}
+afterglow.FirehoseModel = FirehoseModel;
   </script>
 </body>
 </html>

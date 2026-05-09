@@ -291,6 +291,24 @@
         m.destroy();
       });
     });
+
+    describe('FirehoseModel', () => {
+      it('updates one full row per tick', async () => {
+        const m = new (AG().FirehoseModel)(5, 100, 5);
+        let evt = null;
+        m.on('cells-changed', (e) => { evt = e; });
+        await new Promise(r => setTimeout(r, 30));
+        expect(evt === null).toBe(false);
+        expect(evt.rowSpan).toBe(1);
+        expect(evt.colSpan).toBe(5);
+        m.destroy();
+      });
+      it('value buffer is correctly sized', async () => {
+        const m = new (AG().FirehoseModel)(20, 10000, 1000);
+        expect(m.getValueBuffer().length).toBe(200000);
+        m.destroy();
+      });
+    });
     // === END TESTS ===
 
     run();
