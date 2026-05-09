@@ -855,10 +855,44 @@ class Grid {
         if (this.selectionMode === 'row') this.selection = { r0: hit.row, c0: 0, r1: hit.row, c1: this.model.columnCount('body') - 1 };
         else if (this.selectionMode === 'column') this.selection = { r0: 0, c0: hit.col, r1: this.model.rowCount('body') - 1, c1: hit.col };
         else this.selection = { r0: hit.row, c0: hit.col, r1: hit.row, c1: hit.col };
+        this._dragSelectAnchor = { row: hit.row, col: hit.col };
+        try { this.el.setPointerCapture(e.pointerId); } catch {}
+        this._dragMoveHandler = (ev) => {
+          if (!this._dragSelectAnchor) return;
+          const r2 = this.el.getBoundingClientRect();
+          const px2 = ev.clientX - r2.left, py2 = ev.clientY - r2.top;
+          const h2 = Geometry.hitTest(px2, py2, {
+            rowHeaderWidth: this.rowHeaderWidth, colHeaderHeight: this.colHeaderHeight,
+            rowHeight: this.rowHeight, colWidth: this.colWidth,
+            scrollX: this.scrollX, scrollY: this.scrollY,
+            totalRows: this.model.rowCount('body'), totalCols: this.model.columnCount('body')
+          });
+          if (h2.region !== 'body') return;
+          const a = this._dragSelectAnchor;
+          if (this.selectionMode === 'row') {
+            this.selection = { r0: a.row, c0: 0, r1: h2.row, c1: this.model.columnCount('body') - 1 };
+          } else if (this.selectionMode === 'column') {
+            this.selection = { r0: 0, c0: a.col, r1: this.model.rowCount('body') - 1, c1: h2.col };
+          } else {
+            this.selection = { r0: a.row, c0: a.col, r1: h2.row, c1: h2.col };
+          }
+          this._dirty.overlay = true;
+          afterglow.scheduler.schedule(8, this._paintBound);
+        };
+        this._dragUpHandler = (ev) => {
+          this._dragSelectAnchor = null;
+          this.el.removeEventListener('pointermove', this._dragMoveHandler);
+          this.el.removeEventListener('pointerup', this._dragUpHandler);
+          try { this.el.releasePointerCapture(e.pointerId); } catch {}
+        };
+        this.el.addEventListener('pointermove', this._dragMoveHandler);
+        this.el.addEventListener('pointerup', this._dragUpHandler);
         this._dirty.overlay = true;
         afterglow.scheduler.schedule(8, this._paintBound);
       } else if (hit.region === 'column-header' && this.sortable && typeof this.model.sortByColumn === 'function') {
         this.model.sortByColumn(hit.col);
+        this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
+        afterglow.scheduler.schedule(8, this._paintBound);
       }
     });
 
@@ -970,6 +1004,20 @@ class Grid {
       ctx.moveTo(x, this.colHeaderHeight); ctx.lineTo(x, this.cssHeight);
     }
     ctx.stroke();
+    if (this.selection) {
+      const { r0, c0, r1, c1 } = this.selection;
+      const lr = Math.min(r0, r1), hr = Math.max(r0, r1);
+      const lc = Math.min(c0, c1), hc = Math.max(c0, c1);
+      const sx = this.rowHeaderWidth + lc * this.colWidth - this.scrollX;
+      const sy = this.colHeaderHeight + lr * this.rowHeight - this.scrollY;
+      const sw = (hc - lc + 1) * this.colWidth;
+      const sh = (hr - lr + 1) * this.rowHeight;
+      ctx.fillStyle = this.style.selectionFill;
+      ctx.fillRect(sx, sy, sw, sh);
+      ctx.strokeStyle = this.style.selectionBorder;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1);
+    }
     if (this.cursor) {
       const x = this.rowHeaderWidth + this.cursor.col * this.colWidth - this.scrollX;
       const y = this.colHeaderHeight + this.cursor.row * this.rowHeight - this.scrollY;
