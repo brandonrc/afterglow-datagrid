@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Afterglow Tests</title>
+  <style>
+    body { margin: 0; font: 13px/1.4 ui-monospace, Menlo, monospace; background: #0b0d11; color: #e6e8ec; }
+    header { padding: 12px 16px; background: #11151b; border-bottom: 1px solid #1f262f; display: flex; gap: 16px; align-items: center; }
+    header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+    .summary { font-variant-numeric: tabular-nums; }
+    .pass { color: #4ade80; }
+    .fail { color: #f87171; }
+    main { padding: 0 16px 32px; }
+    .case { padding: 4px 8px; border-left: 2px solid #1f262f; margin: 2px 0; }
+    .case.pass { border-color: #4ade80; }
+    .case.fail { border-color: #f87171; }
+    .case .err { display: block; padding-left: 16px; color: #f87171; white-space: pre-wrap; }
+    .group { margin-top: 16px; }
+    .group h2 { font-size: 13px; margin: 0 0 4px; color: #cbd5e1; }
+    iframe { display: none; }
+  </style>
+</head>
+<body>
+  <header><h1>Afterglow Tests</h1><span class="summary" id="summary">running…</span></header>
+  <iframe id="frame" src="index.html"></iframe>
+  <main id="out"></main>
+  <script type="module">
+    const out = document.getElementById('out');
+    const summaryEl = document.getElementById('summary');
+    const groups = [];
+    let current = null;
+    window.describe = (name, fn) => { current = { name, cases: [] }; groups.push(current); fn(); current = null; };
+    window.it = (name, fn) => current.cases.push({ name, fn });
+    window.expect = (actual) => ({
+      toBe: (e) => { if (actual !== e) throw new Error(`expected ${JSON.stringify(actual)} to be ${JSON.stringify(e)}`); },
+      toEqual: (e) => { if (JSON.stringify(actual) !== JSON.stringify(e)) throw new Error(`expected ${JSON.stringify(actual)} to equal ${JSON.stringify(e)}`); },
+      toBeCloseTo: (e, p = 6) => { if (Math.abs(actual - e) > Math.pow(10, -p)) throw new Error(`expected ${actual} ~= ${e}`); },
+      toBeGreaterThan: (e) => { if (!(actual > e)) throw new Error(`expected ${actual} > ${e}`); },
+      toBeLessThan: (e) => { if (!(actual < e)) throw new Error(`expected ${actual} < ${e}`); },
+      toThrow: () => { try { actual(); } catch { return; } throw new Error('expected to throw'); }
+    });
+    window.frame = document.getElementById('frame');
+    window.AG = () => window.frame.contentWindow.afterglow;
+
+    async function run() {
+      await new Promise(r => window.frame.addEventListener('load', r, { once: true }));
+      let pass = 0, fail = 0;
+      for (const g of groups) {
+        const groupEl = document.createElement('div');
+        groupEl.className = 'group';
+        groupEl.innerHTML = `<h2>${g.name}</h2>`;
+        for (const c of g.cases) {
+          const el = document.createElement('div');
+          el.className = 'case';
+          try { await c.fn(); el.classList.add('pass'); el.textContent = '✓ ' + c.name; pass++; }
+          catch (e) { el.classList.add('fail'); el.textContent = '✗ ' + c.name; el.appendChild(Object.assign(document.createElement('span'), { className: 'err', textContent: e.stack || e.message })); fail++; }
+          groupEl.appendChild(el);
+        }
+        out.appendChild(groupEl);
+      }
+      summaryEl.innerHTML = `<span class="pass">${pass} passed</span> · <span class="${fail ? 'fail' : ''}">${fail} failed</span>`;
+    }
+
+    // === START TESTS ===
+    describe('constants', () => {
+      it('VIRIDIS_LUT_256 has 768 bytes (256 RGB triples)', async () => {
+        expect(AG().VIRIDIS_LUT_256.length).toBe(768);
+      });
+      it('viridis(0) returns dark purple', async () => {
+        const [r, g, b] = AG().viridis(0);
+        expect(r).toBeLessThan(80);
+        expect(g).toBeLessThan(10);
+        expect(b).toBeGreaterThan(70);
+      });
+      it('viridis(1) returns yellow-green', async () => {
+        const [r, g, b] = AG().viridis(1);
+        expect(r).toBeGreaterThan(200);
+        expect(g).toBeGreaterThan(200);
+        expect(b).toBeLessThan(150);
+      });
+      it('viridis is monotonic in luminance from 0 to 1', async () => {
+        const lum = (rgb) => 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2];
+        expect(lum(AG().viridis(0))).toBeLessThan(lum(AG().viridis(1)));
+      });
+      it('BRAND has expected token shape', async () => {
+        const b = AG().BRAND;
+        expect(typeof b.magenta).toBe('string');
+        expect(typeof b.cyan).toBe('string');
+      });
+      it('CARS_COLUMNS has 9 entries', async () => {
+        expect(AG().CARS_COLUMNS.length).toBe(9);
+      });
+    });
+
+    describe('EventChannel', () => {
+      it('on/emit fires the listener', async () => {
+        const ch = new (AG().EventChannel)();
+        let got = null;
+        ch.on('x', (p) => { got = p; });
+        ch.emit('x', 42);
+        expect(got).toBe(42);
+      });
+      it('off removes the listener', async () => {
+        const ch = new (AG().EventChannel)();
+        let count = 0;
+        const fn = () => count++;
+        ch.on('x', fn);
+        ch.off('x', fn);
+        ch.emit('x');
+        expect(count).toBe(0);
+      });
+      it('on returns an unsubscribe function', async () => {
+        const ch = new (AG().EventChannel)();
+        let count = 0;
+        const off = ch.on('x', () => count++);
+        ch.emit('x'); off(); ch.emit('x');
+        expect(count).toBe(1);
+      });
+      it('multiple listeners all fire', async () => {
+        const ch = new (AG().EventChannel)();
+        let a = 0, b = 0;
+        ch.on('x', () => a++); ch.on('x', () => b++);
+        ch.emit('x');
+        expect(a).toBe(1); expect(b).toBe(1);
+      });
+      it('emit with no listeners is a no-op', async () => {
+        const ch = new (AG().EventChannel)();
+        ch.emit('x', 1);
+      });
+    });
+
+    describe('RenderScheduler', () => {
+      it('runs higher priority before lower', async () => {
+        const s = new (AG().RenderScheduler)();
+        const order = [];
+        s.schedule(1, () => order.push('low'));
+        s.schedule(10, () => order.push('high'));
+        s.schedule(5, () => order.push('mid'));
+        s._drainSync();
+        expect(order).toEqual(['high', 'mid', 'low']);
+      });
+      it('dedups identical fn references', async () => {
+        const s = new (AG().RenderScheduler)();
+        let count = 0;
+        const fn = () => count++;
+        s.schedule(1, fn); s.schedule(1, fn); s.schedule(1, fn);
+        s._drainSync();
+        expect(count).toBe(1);
+      });
+      it('cancel removes pending work', async () => {
+        const s = new (AG().RenderScheduler)();
+        let count = 0;
+        const fn = () => count++;
+        s.schedule(1, fn);
+        s.cancel(fn);
+        s._drainSync();
+        expect(count).toBe(0);
+      });
+      it('a throwing fn does not stop the queue', async () => {
+        const s = new (AG().RenderScheduler)();
+        let ran = false;
+        s.schedule(1, () => { ran = true; });
+        s.schedule(2, () => { throw new Error('boom'); });
+        s._drainSync();
+        expect(ran).toBe(true);
+      });
+    });
+
+    describe('LargeModel', () => {
+      it('rowCount/columnCount return constructor values for body', async () => {
+        const m = new (AG().LargeModel)(2e12, 2e12);
+        expect(m.rowCount('body')).toBe(2e12);
+        expect(m.columnCount('body')).toBe(2e12);
+      });
+      it('headers return 1 for row/column count', async () => {
+        const m = new (AG().LargeModel)(100, 50);
+        expect(m.rowCount('column-header')).toBe(1);
+        expect(m.columnCount('row-header')).toBe(1);
+      });
+      it('body cell returns parenthesized coords', async () => {
+        const m = new (AG().LargeModel)(10, 10);
+        expect(m.data('body', 5, 7)).toBe('(5, 7)');
+      });
+      it('row-header returns formatted index', async () => {
+        const m = new (AG().LargeModel)(10, 10);
+        expect(m.data('row-header', 3, 0)).toBe('R: 3, 0');
+      });
+      it('handles MAX_SAFE_INTEGER row counts', async () => {
+        const m = new (AG().LargeModel)(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+        expect(m.rowCount('body')).toBe(Number.MAX_SAFE_INTEGER);
+      });
+    });
+
+    describe('JSONModel', () => {
+      it('returns column names for column-header', async () => {
+        const m = AG().makeCarsModel();
+        expect(m.data('column-header', 0, 0)).toBe('Name');
+        expect(m.data('column-header', 0, 1)).toBe('MPG');
+      });
+      it('returns row data for body', async () => {
+        const m = AG().makeCarsModel();
+        expect(typeof m.data('body', 0, 0)).toBe('string');
+      });
+      it('rowCount matches CARS_DATA length', async () => {
+        const m = AG().makeCarsModel();
+        expect(m.rowCount('body')).toBe(AG().CARS_DATA.length);
+      });
+    });
+
+    describe('SortableModel', () => {
+      it('first sortByColumn is ascending', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        const r = m.sortByColumn(1);
+        expect(r.dir).toBe(1);
+      });
+      it('second click on same column is descending', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        m.sortByColumn(1); m.sortByColumn(1);
+        expect(m._sortDir).toBe(-1);
+      });
+      it('third click clears sort', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        m.sortByColumn(1); m.sortByColumn(1); m.sortByColumn(1);
+        expect(m._sortDir).toBe(0);
+        expect(m._perm).toBe(null);
+      });
+      it('ascending sort puts smallest MPG first', async () => {
+        const m = new (AG().SortableModel)(AG().makeCarsModel());
+        m.sortByColumn(1);
+        const v0 = m.data('body', 0, 1);
+        const v1 = m.data('body', 1, 1);
+        expect(v0 <= v1).toBe(true);
+      });
+    });
+
+    describe('RandomTicksModel', () => {
+      it('initializes a Float32Array of correct size', async () => {
+        const m = new (AG().RandomTicksModel)(15, 10, 1000);
+        expect(m.getValueBuffer().length).toBe(150);
+        m.destroy();
+      });
+      it('values are between 0 and 1', async () => {
+        const m = new (AG().RandomTicksModel)(15, 10, 1000);
+        const buf = m.getValueBuffer();
+        let allInRange = true;
+        for (let i = 0; i < buf.length; i++) if (buf[i] < 0 || buf[i] >= 1) allInRange = false;
+        expect(allInRange).toBe(true);
+        m.destroy();
+      });
+      it('single-mode tick emits cells-changed with span 1x1', async () => {
+        const m = new (AG().RandomTicksModel)(5, 5, 5);
+        let evt = null;
+        m.on('cells-changed', (e) => { evt = e; });
+        await new Promise(r => setTimeout(r, 30));
+        expect(evt === null).toBe(false);
+        expect(evt.rowSpan).toBe(1);
+        expect(evt.colSpan).toBe(1);
+        m.destroy();
+      });
+      it('all-mode tick emits one event covering full body', async () => {
+        const m = new (AG().RandomTicksModel)(5, 5, 5, { mode: 'all' });
+        let evt = null;
+        m.on('cells-changed', (e) => { evt = e; });
+        await new Promise(r => setTimeout(r, 30));
+        expect(evt.rowSpan).toBe(5);
+        expect(evt.colSpan).toBe(5);
+        m.destroy();
+      });
+    });
+
+    describe('StreamingModel', () => {
+      it('starts empty, grows on tick', async () => {
+        const m = new (AG().StreamingModel)(5, { intervalMs: 5 });
+        expect(m.rowCount('body')).toBe(0);
+        await new Promise(r => setTimeout(r, 50));
+        expect(m.rowCount('body')).toBeGreaterThan(0);
+        m.destroy();
+      });
+      it('caps at maxRows', async () => {
+        const m = new (AG().StreamingModel)(5, { maxRows: 6, intervalMs: 5 });
+        await new Promise(r => setTimeout(r, 200));
+        expect(m.rowCount('body')).toBeLessThan(7);
+        m.destroy();
+      });
+      it('emits rows-inserted events', async () => {
+        const m = new (AG().StreamingModel)(5, { intervalMs: 5 });
+        let inserts = 0;
+        m.on('rows-inserted', () => inserts++);
+        await new Promise(r => setTimeout(r, 200));
+        expect(inserts).toBeGreaterThan(0);
+        m.destroy();
+      });
+    });
+
+    describe('FirehoseModel', () => {
+      it('updates one full row per tick', async () => {
+        const m = new (AG().FirehoseModel)(5, 100, 5);
+        let evt = null;
+        m.on('cells-changed', (e) => { evt = e; });
+        await new Promise(r => setTimeout(r, 30));
+        expect(evt === null).toBe(false);
+        expect(evt.rowSpan).toBe(1);
+        expect(evt.colSpan).toBe(5);
+        m.destroy();
+      });
+      it('value buffer is correctly sized', async () => {
+        const m = new (AG().FirehoseModel)(20, 10000, 1000);
+        expect(m.getValueBuffer().length).toBe(200000);
+        m.destroy();
+      });
+    });
+
+    describe('cell renderers', () => {
+      it('redGreenBlackRenderer color buckets', async () => {
+        const r = AG().renderers.redGreenBlackRenderer();
+        expect(r.color(0.1)).toBe('#000');
+        expect(r.color(0.5)).toBe('#f00');
+        expect(r.color(0.9)).toBe('#009b00');
+      });
+      it('viridisInverseTextRenderer returns rgb string', async () => {
+        const r = AG().renderers.viridisInverseTextRenderer();
+        const c = r.color(0);
+        expect(c.startsWith('rgb(')).toBe(true);
+      });
+      it('format produces 2-digit fixed', async () => {
+        const r = AG().renderers.redGreenBlackRenderer();
+        expect(r.format(0.123456)).toBe('0.12');
+      });
+    });
+
+    describe('shaders', () => {
+      it('vertex shader is es 3.00', async () => {
+        expect(AG().shaders.SHADER_VS.startsWith('#version 300 es')).toBe(true);
+      });
+      it('fragment shaders are non-empty', async () => {
+        expect(AG().shaders.SHADER_FS_STRIPE.length).toBeGreaterThan(50);
+        expect(AG().shaders.SHADER_FS_VIRIDIS.length).toBeGreaterThan(50);
+        expect(AG().shaders.SHADER_FS_FLAT.length).toBeGreaterThan(20);
+      });
+    });
+
+    describe('renderer worker', () => {
+      it('spawns and reports ready', async () => {
+        const w = await AG().spawnRendererWorker();
+        expect(typeof w.postMessage).toBe('function');
+        w.terminate();
+      });
+    });
+
+    describe('worker WebGL smoke test', () => {
+      it('demoWorker spawns and either paints or fails gracefully', async () => {
+        // WebGL2 may be unavailable in headless test runners; the test passes if
+        // either no error occurred OR the only error is the documented unavailability.
+        const { worker, canvas } = await AG().demoWorker();
+        let err = null;
+        worker.addEventListener('message', (e) => { if (e.data && e.data.op === 'error') err = e.data.message; });
+        await new Promise(r => setTimeout(r, 250));
+        const ok = err === null || /webgl2 unavailable/i.test(err);
+        expect(ok).toBe(true);
+        worker.terminate();
+        canvas.remove();
+      });
+    });
+    describe('TileCache', () => {
+      it('lazy-allocates a tile on get', async () => {
+        const tc = new (AG().TileCache)();
+        const t = tc.get(0, 0);
+        expect(t.dirty).toBe(true);
+        expect(t.canvas.width).toBe(256);
+      });
+      it('returns same object for same coordinates', async () => {
+        const tc = new (AG().TileCache)();
+        const a = tc.get(2, 3); const b = tc.get(2, 3);
+        expect(a).toBe(b);
+      });
+      it('markDirtyRect marks intersecting tiles', async () => {
+        const tc = new (AG().TileCache)();
+        tc.get(0, 0); tc.get(1, 0); tc.get(2, 0);
+        tc._tiles.get('0,0').dirty = false;
+        tc._tiles.get('1,0').dirty = false;
+        tc._tiles.get('2,0').dirty = false;
+        tc.markDirtyRect(300, 50, 50, 50);
+        expect(tc._tiles.get('0,0').dirty).toBe(false);
+        expect(tc._tiles.get('1,0').dirty).toBe(true);
+        expect(tc._tiles.get('2,0').dirty).toBe(false);
+      });
+      it('LRU evicts oldest tile beyond cap', async () => {
+        const tc = new (AG().TileCache)({ maxTiles: 2 });
+        tc.get(0, 0); tc.get(1, 0); tc.get(2, 0);
+        expect(tc._tiles.size).toBe(2);
+        expect(tc._tiles.has('0,0')).toBe(false);
+      });
+      it('forEachVisible iterates expected count of tiles', async () => {
+        const tc = new (AG().TileCache)();
+        let count = 0;
+        tc.forEachVisible(0, 0, 600, 300, () => count++);
+        expect(count).toBe(6);
+      });
+    });
+    describe('Geometry', () => {
+      it('firstVisibleRow rounds down', async () => {
+        expect(AG().Geometry.firstVisibleRow(50, 20)).toBe(2);
+        expect(AG().Geometry.firstVisibleRow(0, 20)).toBe(0);
+      });
+      it('lastVisibleRow clamps to totalRows', async () => {
+        expect(AG().Geometry.lastVisibleRow(0, 20, 100, 3)).toBe(2);
+        expect(AG().Geometry.lastVisibleRow(0, 20, 1000, 1e12)).toBe(49);
+      });
+      it('hit-test in body returns row/col', async () => {
+        const g = { rowHeaderWidth: 64, colHeaderHeight: 20, rowHeight: 20, colWidth: 64, scrollX: 0, scrollY: 0, totalRows: 100, totalCols: 50 };
+        const h = AG().Geometry.hitTest(100, 50, g);
+        expect(h.region).toBe('body');
+        expect(h.row).toBe(1);
+        expect(h.col).toBe(0);
+      });
+      it('hit-test in row-header', async () => {
+        const g = { rowHeaderWidth: 64, colHeaderHeight: 20, rowHeight: 20, colWidth: 64, scrollX: 0, scrollY: 0, totalRows: 100, totalCols: 50 };
+        const h = AG().Geometry.hitTest(10, 50, g);
+        expect(h.region).toBe('row-header');
+      });
+      it('hit-test in corner', async () => {
+        const g = { rowHeaderWidth: 64, colHeaderHeight: 20, rowHeight: 20, colWidth: 64, scrollX: 0, scrollY: 0, totalRows: 100, totalCols: 50 };
+        expect(AG().Geometry.hitTest(10, 10, g).region).toBe('corner-header');
+      });
+    });
+    describe('Grid skeleton', () => {
+      it('constructs without errors', async () => {
+        const m = new (AG().LargeModel)(100, 50);
+        const g = new (AG().Grid)({ model: m });
+        const canvases = Array.from(g.el.querySelectorAll(':scope > canvas'));
+        expect(canvases.length).toBe(3);
+        g.destroy();
+      });
+      it('resize sets canvas dimensions', async () => {
+        const m = new (AG().LargeModel)(100, 50);
+        const g = new (AG().Grid)({ model: m });
+        g.resize(800, 600);
+        expect(g.textCanvas.width).toBeGreaterThan(0);
+        expect(g.overlayCanvas.width).toBeGreaterThan(0);
+        g.destroy();
+      });
+    });
+
+    describe('Dock tree', () => {
+      it('TabNode addTab increases length', async () => {
+        const tn = new (AG().TabNode)();
+        tn.addTab({ title: 'a', content: { el: document.createElement('div'), resize: () => {}, paint: () => {} } });
+        expect(tn.tabs.length).toBe(1);
+      });
+      it('SplitNode normalizes sizes', async () => {
+        const sn = new (AG().SplitNode)('h');
+        const a = new (AG().TabNode)(); const b = new (AG().TabNode)();
+        sn.addChild(a); sn.addChild(b);
+        expect(sn.sizes[0]).toBeCloseTo(0.5);
+        expect(sn.sizes[1]).toBeCloseTo(0.5);
+      });
+    });
+    // === END TESTS ===
+
+    run();
+  </script>
+</body>
+</html>
