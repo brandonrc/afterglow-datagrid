@@ -700,6 +700,125 @@ const Geometry = {
   }
 };
 afterglow.Geometry = Geometry;
+
+// §7c Grid class — three layered canvases + overlay rendering
+class Grid {
+  constructor({ model, style = DEFAULT_STYLE, renderer = textRenderer(), selectionMode = 'cell',
+                rowHeight = 20, colWidth = 64, rowHeaderWidth = 64, colHeaderHeight = 20,
+                fillProgram = 'flat', stripeColors = null, sortable = false } = {}) {
+    this.model = model;
+    this.style = style;
+    this.renderer = renderer;
+    this.selectionMode = selectionMode;
+    this.rowHeight = rowHeight;
+    this.colWidth = colWidth;
+    this.rowHeaderWidth = rowHeaderWidth;
+    this.colHeaderHeight = colHeaderHeight;
+    this.scrollX = 0;
+    this.scrollY = 0;
+    this.cssWidth = 0;
+    this.cssHeight = 0;
+    this.dpr = Math.max(1, window.devicePixelRatio || 1);
+    this.fillProgram = fillProgram;
+    this.stripeColors = stripeColors;
+    this.sortable = sortable;
+    this.cursor = { row: 0, col: 0 };
+    this.selection = null;
+    this._dirty = { fill: true, text: true, overlay: true };
+    this._textCache = new TileCache();
+    this._unsubs = [];
+    this._buildDOM();
+    this._wireModel();
+  }
+  _buildDOM() {
+    this.el = document.createElement('div');
+    this.el.className = 'ag-grid';
+    this.el.style.cssText = 'position:absolute;inset:0;overflow:hidden;background:' + this.style.bg + ';';
+    this.fillCanvas = document.createElement('canvas');
+    this.fillCanvas.style.cssText = 'position:absolute;inset:0;';
+    this.textCanvas = document.createElement('canvas');
+    this.textCanvas.style.cssText = 'position:absolute;inset:0;';
+    this.overlayCanvas = document.createElement('canvas');
+    this.overlayCanvas.style.cssText = 'position:absolute;inset:0;';
+    this.el.appendChild(this.fillCanvas);
+    this.el.appendChild(this.textCanvas);
+    this.el.appendChild(this.overlayCanvas);
+    this._textCtx = this.textCanvas.getContext('2d');
+    this._overlayCtx = this.overlayCanvas.getContext('2d');
+  }
+  _wireModel() {
+    this._unsubs.push(this.model.on('cells-changed', (e) => {
+      const x = e.col * this.colWidth;
+      const y = e.row * this.rowHeight;
+      const w = e.colSpan * this.colWidth;
+      const h = e.rowSpan * this.rowHeight;
+      this._textCache.markDirtyRect(x, y, w, h);
+      this._dirty.text = true;
+      this._dirty.fill = true;
+    }));
+    const invalidate = () => { this._textCache.invalidateAll(); this._dirty.text = true; this._dirty.fill = true; };
+    this._unsubs.push(this.model.on('rows-inserted', invalidate));
+    this._unsubs.push(this.model.on('rows-removed', invalidate));
+    this._unsubs.push(this.model.on('reset', invalidate));
+  }
+  destroy() { for (const u of this._unsubs) u(); this._unsubs = []; }
+  resize(cssW, cssH) {
+    this.cssWidth = cssW; this.cssHeight = cssH;
+    const px = (n) => Math.floor(n * this.dpr);
+    for (const c of [this.textCanvas, this.overlayCanvas]) {
+      c.width = px(cssW); c.height = px(cssH);
+      c.style.width = cssW + 'px'; c.style.height = cssH + 'px';
+    }
+    this.fillCanvas.style.width = cssW + 'px'; this.fillCanvas.style.height = cssH + 'px';
+    this._textCtx.resetTransform?.(); this._textCtx.scale(this.dpr, this.dpr);
+    this._overlayCtx.resetTransform?.(); this._overlayCtx.scale(this.dpr, this.dpr);
+    this._textCache.invalidateAll();
+    this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
+  }
+  paintOverlay() {
+    const ctx = this._overlayCtx;
+    ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+    ctx.strokeStyle = this.style.gridline;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
+    const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, this.model.rowCount('body'));
+    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
+    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, this.model.columnCount('body'));
+    for (let r = r0; r <= r1 + 1; r++) {
+      const y = this.colHeaderHeight + r * this.rowHeight - this.scrollY + 0.5;
+      ctx.moveTo(this.rowHeaderWidth, y); ctx.lineTo(this.cssWidth, y);
+    }
+    for (let c = c0; c <= c1 + 1; c++) {
+      const x = this.rowHeaderWidth + c * this.colWidth - this.scrollX + 0.5;
+      ctx.moveTo(x, this.colHeaderHeight); ctx.lineTo(x, this.cssHeight);
+    }
+    ctx.stroke();
+    if (this.cursor) {
+      const x = this.rowHeaderWidth + this.cursor.col * this.colWidth - this.scrollX;
+      const y = this.colHeaderHeight + this.cursor.row * this.rowHeight - this.scrollY;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = this.style.cursorBorder;
+      ctx.strokeRect(x, y, this.colWidth, this.rowHeight);
+    }
+    this._dirty.overlay = false;
+  }
+  paint() {
+    if (this._dirty.overlay) this.paintOverlay();
+  }
+}
+afterglow.Grid = Grid;
+
+// Manual smoke helper
+afterglow.demoOverlayGrid = () => {
+  const m = new LargeModel(100, 50);
+  const g = new Grid({ model: m });
+  g.el.style.cssText += 'width:600px;height:400px;left:8px;top:8px;border:1px solid #d946ef;background:white;z-index:9999;';
+  document.body.appendChild(g.el);
+  g.resize(600, 400);
+  g.paint();
+  return g;
+};
   </script>
 </body>
 </html>

@@ -420,6 +420,22 @@
         expect(AG().Geometry.hitTest(10, 10, g).region).toBe('corner-header');
       });
     });
+    describe('Grid skeleton', () => {
+      it('constructs without errors', async () => {
+        const m = new (AG().LargeModel)(100, 50);
+        const g = new (AG().Grid)({ model: m });
+        expect(g.el.children.length).toBe(3);
+        g.destroy();
+      });
+      it('resize sets canvas dimensions', async () => {
+        const m = new (AG().LargeModel)(100, 50);
+        const g = new (AG().Grid)({ model: m });
+        g.resize(800, 600);
+        expect(g.textCanvas.width).toBeGreaterThan(0);
+        expect(g.overlayCanvas.width).toBeGreaterThan(0);
+        g.destroy();
+      });
+    });
     // === END TESTS ===
 
     run();
