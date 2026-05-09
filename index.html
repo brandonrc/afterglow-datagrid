@@ -1244,6 +1244,7 @@ class SplitNode {
         const splitter = document.createElement('div');
         splitter.className = 'ag-splitter';
         splitter.dataset.idx = i;
+        this._wireSplitter(splitter, i);
         this.el.appendChild(splitter);
       }
     });
@@ -1262,6 +1263,38 @@ class SplitNode {
         ch._propagateResize();
       }
     }
+  }
+  _wireSplitter(splitter, i) {
+    splitter.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      splitter.setPointerCapture(e.pointerId);
+      const rect = this.el.getBoundingClientRect();
+      const startPos = this.orientation === 'h' ? e.clientX : e.clientY;
+      const startSizes = [...this.sizes];
+      const total = this.orientation === 'h' ? rect.width : rect.height;
+      const wraps = this.el.querySelectorAll(':scope > .ag-child');
+      const move = (ev) => {
+        const cur = this.orientation === 'h' ? ev.clientX : ev.clientY;
+        const d = (cur - startPos) / total;
+        const left = i, right = i + 1;
+        const min = 0.05;
+        let sL = startSizes[left] + d;
+        let sR = startSizes[right] - d;
+        if (sL < min) { sR = startSizes[left] + startSizes[right] - min; sL = min; }
+        if (sR < min) { sL = startSizes[left] + startSizes[right] - min; sR = min; }
+        this.sizes[left] = sL; this.sizes[right] = sR;
+        wraps[left].style.flex = sL + ' 0 0';
+        wraps[right].style.flex = sR + ' 0 0';
+        this._propagateResize();
+      };
+      const up = (ev) => {
+        try { splitter.releasePointerCapture(e.pointerId); } catch {}
+        splitter.removeEventListener('pointermove', move);
+        splitter.removeEventListener('pointerup', up);
+      };
+      splitter.addEventListener('pointermove', move);
+      splitter.addEventListener('pointerup', up);
+    });
   }
 }
 
