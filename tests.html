@@ -267,6 +267,30 @@
         m.destroy();
       });
     });
+
+    describe('StreamingModel', () => {
+      it('starts empty, grows on tick', async () => {
+        const m = new (AG().StreamingModel)(5, { intervalMs: 5 });
+        expect(m.rowCount('body')).toBe(0);
+        await new Promise(r => setTimeout(r, 50));
+        expect(m.rowCount('body')).toBeGreaterThan(0);
+        m.destroy();
+      });
+      it('caps at maxRows', async () => {
+        const m = new (AG().StreamingModel)(5, { maxRows: 6, intervalMs: 5 });
+        await new Promise(r => setTimeout(r, 200));
+        expect(m.rowCount('body')).toBeLessThan(7);
+        m.destroy();
+      });
+      it('emits rows-inserted events', async () => {
+        const m = new (AG().StreamingModel)(5, { intervalMs: 5 });
+        let inserts = 0;
+        m.on('rows-inserted', () => inserts++);
+        await new Promise(r => setTimeout(r, 200));
+        expect(inserts).toBeGreaterThan(0);
+        m.destroy();
+      });
+    });
     // === END TESTS ===
 
     run();

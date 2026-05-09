@@ -288,6 +288,41 @@ class RandomTicksModel extends DataModel {
   }
 }
 afterglow.RandomTicksModel = RandomTicksModel;
+
+class StreamingModel extends DataModel {
+  constructor(colCount, { maxRows = 500, intervalMs = 250 } = {}) {
+    super();
+    this._cols = colCount;
+    this._maxRows = maxRows;
+    this._data = [];
+    this._timer = setInterval(() => this._tick(), intervalMs);
+  }
+  destroy() { clearInterval(this._timer); }
+  rowCount(region) { return region === 'body' ? this._data.length : 1; }
+  columnCount(region) { return region === 'body' ? this._cols : 1; }
+  data(region, row, col) {
+    if (region === 'row-header') return `R: ${row}, ${col}`;
+    if (region === 'column-header') return `C: ${row}, ${col}`;
+    if (region === 'corner-header') return `N: ${row}, ${col}`;
+    return this._data[row][col];
+  }
+  _tick() {
+    const nr = this._data.length;
+    const removeProb = 0.45;
+    if ((Math.random() < removeProb && nr > 4) || nr >= this._maxRows) {
+      const i = Math.floor(Math.random() * nr);
+      this._data.splice(i, 1);
+      this.emit('rows-removed', { region: 'body', index: i, span: 1 });
+    } else {
+      const i = Math.floor(Math.random() * (nr + 1));
+      const row = new Float32Array(this._cols);
+      for (let j = 0; j < this._cols; j++) row[j] = Math.random();
+      this._data.splice(i, 0, row);
+      this.emit('rows-inserted', { region: 'body', index: i, span: 1 });
+    }
+  }
+}
+afterglow.StreamingModel = StreamingModel;
   </script>
 </body>
 </html>
