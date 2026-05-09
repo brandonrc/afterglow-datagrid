@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Afterglow Tests</title>
+  <style>
+    body { margin: 0; font: 13px/1.4 ui-monospace, Menlo, monospace; background: #0b0d11; color: #e6e8ec; }
+    header { padding: 12px 16px; background: #11151b; border-bottom: 1px solid #1f262f; display: flex; gap: 16px; align-items: center; }
+    header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+    .summary { font-variant-numeric: tabular-nums; }
+    .pass { color: #4ade80; }
+    .fail { color: #f87171; }
+    main { padding: 0 16px 32px; }
+    .case { padding: 4px 8px; border-left: 2px solid #1f262f; margin: 2px 0; }
+    .case.pass { border-color: #4ade80; }
+    .case.fail { border-color: #f87171; }
+    .case .err { display: block; padding-left: 16px; color: #f87171; white-space: pre-wrap; }
+    .group { margin-top: 16px; }
+    .group h2 { font-size: 13px; margin: 0 0 4px; color: #cbd5e1; }
+    iframe { display: none; }
+  </style>
+</head>
+<body>
+  <header><h1>Afterglow Tests</h1><span class="summary" id="summary">running…</span></header>
+  <iframe id="frame" src="index.html"></iframe>
+  <main id="out"></main>
+  <script type="module">
+    const out = document.getElementById('out');
+    const summaryEl = document.getElementById('summary');
+    const groups = [];
+    let current = null;
+    window.describe = (name, fn) => { current = { name, cases: [] }; groups.push(current); fn(); current = null; };
+    window.it = (name, fn) => current.cases.push({ name, fn });
+    window.expect = (actual) => ({
+      toBe: (e) => { if (actual !== e) throw new Error(`expected ${JSON.stringify(actual)} to be ${JSON.stringify(e)}`); },
+      toEqual: (e) => { if (JSON.stringify(actual) !== JSON.stringify(e)) throw new Error(`expected ${JSON.stringify(actual)} to equal ${JSON.stringify(e)}`); },
+      toBeCloseTo: (e, p = 6) => { if (Math.abs(actual - e) > Math.pow(10, -p)) throw new Error(`expected ${actual} ~= ${e}`); },
+      toBeGreaterThan: (e) => { if (!(actual > e)) throw new Error(`expected ${actual} > ${e}`); },
+      toBeLessThan: (e) => { if (!(actual < e)) throw new Error(`expected ${actual} < ${e}`); },
+      toThrow: () => { try { actual(); } catch { return; } throw new Error('expected to throw'); }
+    });
+    window.frame = document.getElementById('frame');
+    window.AG = () => window.frame.contentWindow.afterglow;
+
+    async function run() {
+      await new Promise(r => window.frame.addEventListener('load', r, { once: true }));
+      let pass = 0, fail = 0;
+      for (const g of groups) {
+        const groupEl = document.createElement('div');
+        groupEl.className = 'group';
+        groupEl.innerHTML = `<h2>${g.name}</h2>`;
+        for (const c of g.cases) {
+          const el = document.createElement('div');
+          el.className = 'case';
+          try { await c.fn(); el.classList.add('pass'); el.textContent = '✓ ' + c.name; pass++; }
+          catch (e) { el.classList.add('fail'); el.textContent = '✗ ' + c.name; el.appendChild(Object.assign(document.createElement('span'), { className: 'err', textContent: e.stack || e.message })); fail++; }
+          groupEl.appendChild(el);
+        }
+        out.appendChild(groupEl);
+      }
+      summaryEl.innerHTML = `<span class="pass">${pass} passed</span> · <span class="${fail ? 'fail' : ''}">${fail} failed</span>`;
+    }
+
+    // === START TESTS ===
+    // (test groups appended by subsequent tasks)
+    // === END TESTS ===
+
+    run();
+  </script>
+</body>
+</html>
