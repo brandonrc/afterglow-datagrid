@@ -1565,6 +1565,16 @@ afterglow.bench = async (seconds = 5) => {
   }
 };
 
+// §9b Brand surface mount helper
+afterglow.mountBrandSurface = () => {
+  if (document.querySelector('.ag-wordmark')) return;
+  const w = document.createElement('div');
+  w.className = 'ag-wordmark';
+  w.title = 'phosphor faded.';
+  w.textContent = 'AFTERGLOW';
+  document.body.appendChild(w);
+};
+
 // Manual smoke
 afterglow.demoDockBasic = () => {
   const root = new SplitNode('h');
