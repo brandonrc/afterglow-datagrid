@@ -91,6 +91,43 @@
         expect(AG().CARS_COLUMNS.length).toBe(9);
       });
     });
+
+    describe('EventChannel', () => {
+      it('on/emit fires the listener', async () => {
+        const ch = new (AG().EventChannel)();
+        let got = null;
+        ch.on('x', (p) => { got = p; });
+        ch.emit('x', 42);
+        expect(got).toBe(42);
+      });
+      it('off removes the listener', async () => {
+        const ch = new (AG().EventChannel)();
+        let count = 0;
+        const fn = () => count++;
+        ch.on('x', fn);
+        ch.off('x', fn);
+        ch.emit('x');
+        expect(count).toBe(0);
+      });
+      it('on returns an unsubscribe function', async () => {
+        const ch = new (AG().EventChannel)();
+        let count = 0;
+        const off = ch.on('x', () => count++);
+        ch.emit('x'); off(); ch.emit('x');
+        expect(count).toBe(1);
+      });
+      it('multiple listeners all fire', async () => {
+        const ch = new (AG().EventChannel)();
+        let a = 0, b = 0;
+        ch.on('x', () => a++); ch.on('x', () => b++);
+        ch.emit('x');
+        expect(a).toBe(1); expect(b).toBe(1);
+      });
+      it('emit with no listeners is a no-op', async () => {
+        const ch = new (AG().EventChannel)();
+        ch.emit('x', 1);
+      });
+    });
     // === END TESTS ===
 
     run();

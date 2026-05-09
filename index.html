@@ -84,6 +84,27 @@ const CARS_DATA = [
 const CARS_COLUMNS = ["Name", "MPG", "Cylinders", "Displacement", "Horsepower", "Weight", "Acceleration", "Year", "Origin"];
 afterglow.CARS_DATA = CARS_DATA;
 afterglow.CARS_COLUMNS = CARS_COLUMNS;
+
+// §2 EventChannel — pub/sub
+class EventChannel {
+  constructor() { this._listeners = new Map(); }
+  on(type, fn) {
+    let s = this._listeners.get(type);
+    if (!s) this._listeners.set(type, (s = new Set()));
+    s.add(fn);
+    return () => this.off(type, fn);
+  }
+  off(type, fn) {
+    const s = this._listeners.get(type);
+    if (s) s.delete(fn);
+  }
+  emit(type, payload) {
+    const s = this._listeners.get(type);
+    if (!s) return;
+    for (const fn of s) fn(payload);
+  }
+}
+afterglow.EventChannel = EventChannel;
   </script>
 </body>
 </html>
