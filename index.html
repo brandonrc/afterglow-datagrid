@@ -1447,6 +1447,10 @@ class Grid {
     const totalW = Math.min(33000000, this.model.columnCount('body') * this.colWidth);
     if (this.vScrollInner) this.vScrollInner.style.height = totalH + 'px';
     if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
+    // Resize is a strong "everything must repaint" signal — clear any stale
+    // scroll velocity so adaptive fidelity doesn't drop the text layer.
+    this._scrollVelocity = 0;
+    this._idleTextScheduled = false;
     this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
     if (this._worker) {
       this._worker.postMessage({ op: 'resize', cssW, cssH, dprIn: this.dpr });
@@ -1538,7 +1542,13 @@ class Grid {
         let dx = x + 4;
         if (align === 'right') dx = x + this.colWidth - 4;
         else if (align === 'center') dx = x + this.colWidth / 2;
+        // Clip to cell bounds so long values don't bleed into neighbors.
+        tCtx.save();
+        tCtx.beginPath();
+        tCtx.rect(x, row * this.rowHeight - ty * ts, this.colWidth, this.rowHeight);
+        tCtx.clip();
         tCtx.fillText(text, dx, y);
+        tCtx.restore();
       }
     }
     tile.dirty = false;
@@ -2143,13 +2153,15 @@ async function main() {
   const stripeBrown = { a: [0.65, 0.56, 0.21, 0.20], b: [0.00, 0.00, 0.00, 0.00], flat: [1,1,1,1] };
   const stripeGreen = { a: [0.25, 0.45, 0.21, 0.20], b: [0.00, 0.00, 0.00, 0.00], flat: [1,1,1,1] };
 
-  const g1 = new Grid({ model: m1, fillProgram: 'stripe', stripeColors: stripeBlue,  style: BLUE_STRIPE_STYLE });
+  const g1 = new Grid({ model: m1, fillProgram: 'stripe', stripeColors: stripeBlue,  style: BLUE_STRIPE_STYLE,
+                        colWidth: 132, rowHeaderWidth: 132 });
   const g2 = new Grid({ model: m2, fillProgram: 'stripe', stripeColors: stripeBrown, style: BROWN_STRIPE_STYLE, selectionMode: 'column' });
   const g3 = new Grid({ model: m3, fillProgram: 'flat',   renderer: redGreenBlackRenderer() });
   const g4 = new Grid({ model: m4, fillProgram: 'viridis', renderer: viridisInverseTextRenderer(), style: LIGHT_SELECTION_STYLE });
   const g5 = new Grid({ model: m5, fillProgram: 'stripe', stripeColors: stripeGreen, style: GREEN_STRIPE_STYLE, selectionMode: 'row',
                         rowHeight: 32, colWidth: 128, rowHeaderWidth: 64, colHeaderHeight: 32 });
-  const g6 = new Grid({ model: m6, fillProgram: 'stripe', stripeColors: stripeBlue,  style: BLUE_STRIPE_STYLE });
+  const g6 = new Grid({ model: m6, fillProgram: 'stripe', stripeColors: stripeBlue,  style: BLUE_STRIPE_STYLE,
+                        colWidth: 168, rowHeaderWidth: 168 });
   const g7 = new Grid({ model: m7, fillProgram: 'viridis', renderer: viridisInverseTextRenderer(), style: LIGHT_SELECTION_STYLE });
   const g8 = new Grid({ model: m8, fillProgram: 'flat',   renderer: redGreenBlackRenderer() });
   const g9 = new Grid({ model: m9, fillProgram: 'stripe', stripeColors: stripeGreen, style: GREEN_STRIPE_STYLE, sortable: true });
