@@ -33,6 +33,25 @@
     .ag-tab.active::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--ag-magenta); }
     .ag-tab-content { position: relative; flex: 1; overflow: hidden; }
     .ag-grid { background: white; }
+    .ag-grid > div[style*="overflow-y"], .ag-grid > div[style*="overflow-x"] {
+      scrollbar-color: var(--ag-magenta) rgba(11,13,17,0.4);
+    }
+    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar,
+    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar {
+      width: 12px; height: 12px; background: rgba(11,13,17,0.5);
+    }
+    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar-thumb,
+    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg, rgba(217,70,239,0.85), rgba(6,182,212,0.85));
+      border-radius: 6px;
+      border: 2px solid rgba(11,13,17,0.5);
+    }
+    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar-thumb:hover,
+    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar-thumb:hover {
+      background: linear-gradient(180deg, rgba(217,70,239,1), rgba(6,182,212,1));
+    }
+    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar-corner,
+    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar-corner { background: transparent; }
     .ag-drop-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 999; }
     .ag-drop-zone { position: absolute; background: rgba(217,70,239,0.15); border: 2px dashed rgba(217,70,239,0.7); display: flex; align-items: center; justify-content: center; color: var(--ag-magenta); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; pointer-events: auto; }
     .ag-drop-zone.hover { background: rgba(217,70,239,0.45); }
@@ -694,12 +713,22 @@ afterglow.SortableModel = SortableModel;
 afterglow.makeCarsModel = () => new JSONModel(CARS_DATA, CARS_COLUMNS);
 
 class RandomTicksModel extends DataModel {
-  constructor(rowCount, colCount, intervalMs, { mode = 'single' } = {}) {
+  constructor(rowCount, colCount, intervalMs, { mode = 'single', init = 'random' } = {}) {
     super();
     this._rows = rowCount;
     this._cols = colCount;
     this._buf = new Float32Array(rowCount * colCount);
-    for (let i = 0; i < this._buf.length; i++) this._buf[i] = Math.random();
+    if (init === 'gradient') {
+      // Top-left = 0 (darkest viridis purple); bottom-right = 1 (brightest yellow).
+      const denom = Math.max(1, (rowCount - 1) + (colCount - 1));
+      for (let r = 0; r < rowCount; r++) {
+        for (let c = 0; c < colCount; c++) {
+          this._buf[r * colCount + c] = (r + c) / denom;
+        }
+      }
+    } else {
+      for (let i = 0; i < this._buf.length; i++) this._buf[i] = Math.random();
+    }
     this._mode = mode;
     this._timer = setInterval(() => this._tick(), intervalMs);
   }
@@ -841,19 +870,18 @@ afterglow.renderers = { textRenderer, redGreenBlackRenderer, viridisInverseTextR
 const SHADER_VS = `#version 300 es
 precision highp float;
 in vec2 a_quad;
-in vec3 a_inst;
-uniform vec2 u_cellSize;   // CSS pixels
-uniform vec2 u_view;       // CSS pixels
+in vec4 a_rect;            // (left, top, width, height) in CSS pixels relative to grid origin
+in float a_value;
+uniform vec2 u_view;       // CSS pixels (scroll offset minus header bands)
 uniform vec2 u_canvasPx;   // physical (backing-store) pixels
 uniform float u_dpr;       // physical / CSS
 out float v_value;
 void main() {
-  vec2 cellOrigin = vec2(a_inst.x, a_inst.y) * u_cellSize - u_view;
-  vec2 cssPx = cellOrigin + a_quad * u_cellSize;
+  vec2 cssPx = vec2(a_rect.x, a_rect.y) - u_view + a_quad * vec2(a_rect.z, a_rect.w);
   vec2 ndc = (cssPx * u_dpr / u_canvasPx) * 2.0 - 1.0;
   ndc.y *= -1.0;
   gl_Position = vec4(ndc, 0.0, 1.0);
-  v_value = a_inst.z;
+  v_value = a_value;
 }`;
 
 const SHADER_FS_STRIPE = `#version 300 es
@@ -976,7 +1004,6 @@ function paint() {
   const prog = programs[activeProgram];
   if (!prog) return;
   gl.useProgram(prog);
-  gl.uniform2f(gl.getUniformLocation(prog, 'u_cellSize'), cellSize[0], cellSize[1]);
   gl.uniform2f(gl.getUniformLocation(prog, 'u_view'), view[0], view[1]);
   gl.uniform2f(gl.getUniformLocation(prog, 'u_canvasPx'), canvas.width, canvas.height);
   gl.uniform1f(gl.getUniformLocation(prog, 'u_dpr'), dpr);
@@ -995,11 +1022,21 @@ function paint() {
   gl.enableVertexAttribArray(aQuad);
   gl.vertexAttribPointer(aQuad, 2, gl.FLOAT, false, 0, 0);
   gl.vertexAttribDivisor(aQuad, 0);
-  const aInst = gl.getAttribLocation(prog, 'a_inst');
+  // Instance buffer is interleaved: [x, y, w, h, value] = 20 bytes/stride.
+  const stride = 20;
   gl.bindBuffer(gl.ARRAY_BUFFER, valueBuffer);
-  gl.enableVertexAttribArray(aInst);
-  gl.vertexAttribPointer(aInst, 3, gl.FLOAT, false, 0, 0);
-  gl.vertexAttribDivisor(aInst, 1);
+  const aRect = gl.getAttribLocation(prog, 'a_rect');
+  if (aRect >= 0) {
+    gl.enableVertexAttribArray(aRect);
+    gl.vertexAttribPointer(aRect, 4, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribDivisor(aRect, 1);
+  }
+  const aValue = gl.getAttribLocation(prog, 'a_value');
+  if (aValue >= 0) {
+    gl.enableVertexAttribArray(aValue);
+    gl.vertexAttribPointer(aValue, 1, gl.FLOAT, false, stride, 16);
+    gl.vertexAttribDivisor(aValue, 1);
+  }
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, instanceCount);
 }
 
@@ -1168,12 +1205,60 @@ class Grid {
     this.sortable = sortable;
     this.cursor = { row: 0, col: 0 };
     this.selection = null;
+    this.colOverrides = new Map();   // col index -> width in CSS px
     this._dirty = { fill: true, text: true, overlay: true };
     this._textCache = new TileCache();
     this._unsubs = [];
     this._buildDOM();
     this._wireModel();
     this._initWorker();
+  }
+  // --- Column geometry helpers (uniform default + sparse overrides) ---
+  getColWidth(c) {
+    return this.colOverrides.has(c) ? this.colOverrides.get(c) : this.colWidth;
+  }
+  setColWidth(c, w) {
+    if (w === this.colWidth) this.colOverrides.delete(c);
+    else this.colOverrides.set(c, w);
+  }
+  // CSS x of column c's left edge, relative to grid origin (no scroll, no header band).
+  columnLeft(c) {
+    if (this.colOverrides.size === 0) return c * this.colWidth;
+    let delta = 0;
+    for (const [k, w] of this.colOverrides) {
+      if (k < c) delta += (w - this.colWidth);
+    }
+    return c * this.colWidth + delta;
+  }
+  // Find column index whose [left, left+width) contains `x` (CSS px relative to grid origin).
+  columnAtX(x) {
+    if (x < 0) return 0;
+    if (this.colOverrides.size === 0) return Math.floor(x / this.colWidth);
+    const keys = Array.from(this.colOverrides.keys()).sort((a, b) => a - b);
+    let pos = 0;
+    let cIdx = 0;
+    for (const k of keys) {
+      const dist = k - cIdx;
+      if (pos + dist * this.colWidth > x) {
+        return cIdx + Math.floor((x - pos) / this.colWidth);
+      }
+      pos += dist * this.colWidth;
+      cIdx = k;
+      const w = this.colOverrides.get(k);
+      if (pos + w > x) return k;
+      pos += w;
+      cIdx = k + 1;
+    }
+    return cIdx + Math.floor((x - pos) / this.colWidth);
+  }
+  totalContentWidth() {
+    return this.columnLeft(this.model.columnCount('body'));
+  }
+  firstVisibleCol() { return this.columnAtX(this.scrollX); }
+  lastVisibleCol() {
+    const totalCols = this.model.columnCount('body');
+    const c = this.columnAtX(this.scrollX + (this.cssWidth - this.rowHeaderWidth) - 1);
+    return Math.min(totalCols - 1, c);
   }
   _buildDOM() {
     this.el = document.createElement('div');
@@ -1231,7 +1316,7 @@ class Grid {
       this._lastScrollT = t;
       const range = Math.max(1, this.hScrollEl.scrollWidth - this.hScrollEl.clientWidth);
       const ratio = this.hScrollEl.scrollLeft / range;
-      const max = Math.max(0, this.model.columnCount('body') * this.colWidth - (this.cssWidth - this.rowHeaderWidth));
+      const max = Math.max(0, this.totalContentWidth() - (this.cssWidth - this.rowHeaderWidth));
       this.scrollX = ratio * max;
       this._textCache.invalidateAll();
       this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
@@ -1266,15 +1351,19 @@ class Grid {
       if (edge) {
         e.preventDefault();
         try { this.el.setPointerCapture(e.pointerId); } catch {}
-        this._resizeAnchor = { kind: edge.kind, startPx: edge.kind === 'col' ? px : py, startSize: edge.kind === 'col' ? this.colWidth : this.rowHeight, edgeIndex: edge.index };
+        const startSize = edge.kind === 'col' ? this.getColWidth(edge.index) : this.rowHeight;
+        this._resizeAnchor = { kind: edge.kind, startPx: edge.kind === 'col' ? px : py, startSize, edgeIndex: edge.index };
         const move = (ev) => {
           if (!this._resizeAnchor) return;
           const r2 = this.el.getBoundingClientRect();
           const cur = this._resizeAnchor.kind === 'col' ? (ev.clientX - r2.left) : (ev.clientY - r2.top);
           const delta = cur - this._resizeAnchor.startPx;
-          const slots = this._resizeAnchor.edgeIndex + 1;
-          const newSize = Math.max(20, Math.min(800, this._resizeAnchor.startSize + delta / slots));
-          if (this._resizeAnchor.kind === 'col') this.colWidth = newSize; else this.rowHeight = newSize;
+          const newSize = Math.max(20, Math.min(800, this._resizeAnchor.startSize + delta));
+          if (this._resizeAnchor.kind === 'col') {
+            this.setColWidth(this._resizeAnchor.edgeIndex, newSize);
+          } else {
+            this.rowHeight = newSize;
+          }
           this._textCache.invalidateAll();
           this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
           afterglow.scheduler.schedule(8, this._paintBound);
@@ -1285,9 +1374,8 @@ class Grid {
           this.el.removeEventListener('pointerup', up);
           try { this.el.releasePointerCapture(e.pointerId); } catch {}
           this.el.style.cursor = '';
-          // Update scrollbar inner sizes after final size change
           const totalH = Math.min(33000000, this.model.rowCount('body') * this.rowHeight);
-          const totalW = Math.min(33000000, this.model.columnCount('body') * this.colWidth);
+          const totalW = Math.min(33000000, this.totalContentWidth());
           if (this.vScrollInner) this.vScrollInner.style.height = totalH + 'px';
           if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
         };
@@ -1296,12 +1384,7 @@ class Grid {
         return;
       }
 
-      const hit = Geometry.hitTest(px, py, {
-        rowHeaderWidth: this.rowHeaderWidth, colHeaderHeight: this.colHeaderHeight,
-        rowHeight: this.rowHeight, colWidth: this.colWidth,
-        scrollX: this.scrollX, scrollY: this.scrollY,
-        totalRows: this.model.rowCount('body'), totalCols: this.model.columnCount('body')
-      });
+      const hit = this._hitTest(px, py);
       if (hit.region === 'body') {
         if (hit.row < 0 || hit.col < 0) return;
         this.cursor = { row: hit.row, col: hit.col };
@@ -1314,12 +1397,7 @@ class Grid {
           if (!this._dragSelectAnchor) return;
           const r2 = this.el.getBoundingClientRect();
           const px2 = ev.clientX - r2.left, py2 = ev.clientY - r2.top;
-          const h2 = Geometry.hitTest(px2, py2, {
-            rowHeaderWidth: this.rowHeaderWidth, colHeaderHeight: this.colHeaderHeight,
-            rowHeight: this.rowHeight, colWidth: this.colWidth,
-            scrollX: this.scrollX, scrollY: this.scrollY,
-            totalRows: this.model.rowCount('body'), totalCols: this.model.columnCount('body')
-          });
+          const h2 = this._hitTest(px2, py2);
           if (h2.region !== 'body') return;
           const a = this._dragSelectAnchor;
           if (this.selectionMode === 'row') {
@@ -1352,8 +1430,16 @@ class Grid {
     this.el.addEventListener('dblclick', (e) => {
       const rect = this.el.getBoundingClientRect();
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
-      if (py < this.colHeaderHeight && px >= this.rowHeaderWidth) {
-        this._autoSizeColumns();
+      if (px < this.rowHeaderWidth && py < this.colHeaderHeight) {
+        // Corner: auto-size every currently visible column individually.
+        this._autoSizeAllVisibleColumns();
+      } else if (py < this.colHeaderHeight && px >= this.rowHeaderWidth) {
+        // Specific column header: auto-size that column only.
+        const col = this.columnAtX(px - this.rowHeaderWidth + this.scrollX);
+        if (col >= 0 && col < this.model.columnCount('body')) {
+          this._autoSizeColumn(col);
+          this._afterColumnGeometryChange();
+        }
       }
     });
 
@@ -1379,45 +1465,64 @@ class Grid {
       afterglow.scheduler.schedule(8, this._paintBound);
     });
   }
-  _autoSizeColumns() {
+  _hitTest(px, py) {
+    if (px < this.rowHeaderWidth && py < this.colHeaderHeight) return { region: 'corner-header' };
+    if (px < this.rowHeaderWidth) {
+      const row = Math.floor((py - this.colHeaderHeight + this.scrollY) / this.rowHeight);
+      return { region: 'row-header', row };
+    }
+    if (py < this.colHeaderHeight) {
+      const col = this.columnAtX(px - this.rowHeaderWidth + this.scrollX);
+      return { region: 'column-header', col };
+    }
+    const row = Math.floor((py - this.colHeaderHeight + this.scrollY) / this.rowHeight);
+    const col = this.columnAtX(px - this.rowHeaderWidth + this.scrollX);
+    return { region: 'body', row, col };
+  }
+  // Auto-size one column (cols=null means every visible column individually,
+  // i.e. corner-double-click). Measures visible body cells + the column-header
+  // label and sets the per-column width.
+  _autoSizeColumn(col) {
     const ctx = this._textCtx;
     const r = this.renderer;
     const m = this.model;
     const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
     const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, m.rowCount('body'));
-    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
-    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, m.columnCount('body'));
     ctx.save();
     let maxW = 32;
     ctx.font = typeof r.font === 'string' ? r.font : '12px ui-sans-serif, sans-serif';
     for (let row = r0; row <= r1; row++) {
-      for (let col = c0; col <= c1; col++) {
-        const v = m.data('body', row, col);
-        const text = typeof r.format === 'function' ? r.format(v) : String(v);
-        const w = ctx.measureText(text).width;
-        if (w > maxW) maxW = w;
-      }
-    }
-    ctx.font = '12px ui-sans-serif, sans-serif';
-    for (let col = c0; col <= c1; col++) {
-      const w = ctx.measureText(String(m.data('column-header', 0, col))).width;
+      const v = m.data('body', row, col);
+      const text = typeof r.format === 'function' ? r.format(v) : String(v);
+      const w = ctx.measureText(text).width;
       if (w > maxW) maxW = w;
     }
+    ctx.font = '12px ui-sans-serif, sans-serif';
+    const hw = ctx.measureText(String(m.data('column-header', 0, col))).width;
+    if (hw > maxW) maxW = hw;
     ctx.restore();
-    this.colWidth = Math.min(800, Math.max(32, Math.ceil(maxW) + 14));
+    this.setColWidth(col, Math.min(800, Math.max(32, Math.ceil(maxW) + 14)));
+  }
+  _autoSizeAllVisibleColumns() {
+    const c0 = this.firstVisibleCol();
+    const c1 = this.lastVisibleCol();
+    for (let col = c0; col <= c1; col++) this._autoSizeColumn(col);
+    this._afterColumnGeometryChange();
+  }
+  _afterColumnGeometryChange() {
     this._textCache.invalidateAll();
     this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
-    const totalW = Math.min(33000000, this.model.columnCount('body') * this.colWidth);
+    const totalW = Math.min(33000000, this.totalContentWidth());
     if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
     afterglow.scheduler.schedule(8, this._paintBound);
   }
   _hitResizeEdge(px, py) {
     // Column-edge: pointer is in column-header band, within 4px of any visible column boundary.
     if (py < this.colHeaderHeight && px >= this.rowHeaderWidth) {
-      const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
-      const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, this.model.columnCount('body'));
+      const c0 = this.firstVisibleCol();
+      const c1 = this.lastVisibleCol();
       for (let c = c0; c <= c1 + 1; c++) {
-        const edgeX = this.rowHeaderWidth + (c + 1) * this.colWidth - this.scrollX;
+        const edgeX = this.rowHeaderWidth + this.columnLeft(c + 1) - this.scrollX;
         if (Math.abs(px - edgeX) <= 4) return { kind: 'col', index: c };
       }
     }
@@ -1434,9 +1539,9 @@ class Grid {
   }
   _wireModel() {
     this._unsubs.push(this.model.on('cells-changed', (e) => {
-      const x = e.col * this.colWidth;
+      const x = this.columnLeft(e.col);
       const y = e.row * this.rowHeight;
-      const w = e.colSpan * this.colWidth;
+      const w = this.columnLeft(e.col + e.colSpan) - x;
       const h = e.rowSpan * this.rowHeight;
       this._textCache.markDirtyRect(x, y, w, h);
       this._dirty.text = true;
@@ -1487,7 +1592,7 @@ class Grid {
     this._overlayCtx.resetTransform?.(); this._overlayCtx.scale(this.dpr, this.dpr);
     this._textCache.invalidateAll();
     const totalH = Math.min(33000000, this.model.rowCount('body') * this.rowHeight);
-    const totalW = Math.min(33000000, this.model.columnCount('body') * this.colWidth);
+    const totalW = Math.min(33000000, this.totalContentWidth());
     if (this.vScrollInner) this.vScrollInner.style.height = totalH + 'px';
     if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
     // Resize is a strong "everything must repaint" signal — clear any stale
@@ -1511,14 +1616,14 @@ class Grid {
     ctx.beginPath();
     const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
     const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, this.model.rowCount('body'));
-    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
-    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, this.model.columnCount('body'));
+    const c0 = this.firstVisibleCol();
+    const c1 = this.lastVisibleCol();
     for (let r = r0; r <= r1 + 1; r++) {
       const y = this.colHeaderHeight + r * this.rowHeight - this.scrollY + 0.5;
       ctx.moveTo(this.rowHeaderWidth, y); ctx.lineTo(this.cssWidth, y);
     }
     for (let c = c0; c <= c1 + 1; c++) {
-      const x = this.rowHeaderWidth + c * this.colWidth - this.scrollX + 0.5;
+      const x = this.rowHeaderWidth + this.columnLeft(c) - this.scrollX + 0.5;
       ctx.moveTo(x, this.colHeaderHeight); ctx.lineTo(x, this.cssHeight);
     }
     ctx.stroke();
@@ -1526,9 +1631,9 @@ class Grid {
       const { r0, c0, r1, c1 } = this.selection;
       const lr = Math.min(r0, r1), hr = Math.max(r0, r1);
       const lc = Math.min(c0, c1), hc = Math.max(c0, c1);
-      const sx = this.rowHeaderWidth + lc * this.colWidth - this.scrollX;
+      const sx = this.rowHeaderWidth + this.columnLeft(lc) - this.scrollX;
       const sy = this.colHeaderHeight + lr * this.rowHeight - this.scrollY;
-      const sw = (hc - lc + 1) * this.colWidth;
+      const sw = this.columnLeft(hc + 1) - this.columnLeft(lc);
       const sh = (hr - lr + 1) * this.rowHeight;
       ctx.fillStyle = this.style.selectionFill;
       ctx.fillRect(sx, sy, sw, sh);
@@ -1537,11 +1642,11 @@ class Grid {
       ctx.strokeRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1);
     }
     if (this.cursor) {
-      const x = this.rowHeaderWidth + this.cursor.col * this.colWidth - this.scrollX;
+      const x = this.rowHeaderWidth + this.columnLeft(this.cursor.col) - this.scrollX;
       const y = this.colHeaderHeight + this.cursor.row * this.rowHeight - this.scrollY;
       ctx.lineWidth = 2;
       ctx.strokeStyle = this.style.cursorBorder;
-      ctx.strokeRect(x, y, this.colWidth, this.rowHeight);
+      ctx.strokeRect(x, y, this.getColWidth(this.cursor.col), this.rowHeight);
     }
     this._dirty.overlay = false;
   }
@@ -1570,25 +1675,26 @@ class Grid {
     tCtx.textBaseline = 'middle';
     const r0 = Math.max(0, Math.floor((ty * ts) / this.rowHeight));
     const r1 = Math.min(m.rowCount('body') - 1, Math.floor(((ty + 1) * ts - 1) / this.rowHeight));
-    const c0 = Math.max(0, Math.floor((tx * ts) / this.colWidth));
-    const c1 = Math.min(m.columnCount('body') - 1, Math.floor(((tx + 1) * ts - 1) / this.colWidth));
+    const c0 = Math.max(0, this.columnAtX(tx * ts));
+    const c1 = Math.min(m.columnCount('body') - 1, this.columnAtX((tx + 1) * ts - 1));
     for (let row = r0; row <= r1; row++) {
       for (let col = c0; col <= c1; col++) {
         const v = m.data('body', row, col);
         const text = typeof r.format === 'function' ? r.format(v) : String(v);
         const color = typeof r.color === 'function' ? r.color(v) : r.color;
         tCtx.fillStyle = color;
-        const x = col * this.colWidth - tx * ts;
+        const cw = this.getColWidth(col);
+        const x = this.columnLeft(col) - tx * ts;
         const y = row * this.rowHeight - ty * ts + this.rowHeight / 2;
         const align = r.align || 'left';
         tCtx.textAlign = align;
         let dx = x + 4;
-        if (align === 'right') dx = x + this.colWidth - 4;
-        else if (align === 'center') dx = x + this.colWidth / 2;
+        if (align === 'right') dx = x + cw - 4;
+        else if (align === 'center') dx = x + cw / 2;
         // Clip to cell bounds so long values don't bleed into neighbors.
         tCtx.save();
         tCtx.beginPath();
-        tCtx.rect(x, row * this.rowHeight - ty * ts, this.colWidth, this.rowHeight);
+        tCtx.rect(x, row * this.rowHeight - ty * ts, cw, this.rowHeight);
         tCtx.clip();
         tCtx.fillText(text, dx, y);
         tCtx.restore();
@@ -1604,33 +1710,56 @@ class Grid {
     const totalCols = m.columnCount('body');
     const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
     const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, totalRows);
-    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
-    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, totalCols);
+    const c0 = this.firstVisibleCol();
+    const c1 = this.lastVisibleCol();
     const rows = Math.max(0, r1 - r0 + 1);
     const cols = Math.max(0, c1 - c0 + 1);
     const total = rows * cols;
-    const buf = new Float32Array(total * 3);
+    // Per-instance attributes: [x, y, w, h, value] in CSS pixels (relative to grid origin).
+    const buf = new Float32Array(total * 5);
+    // Precompute column lefts/widths once for the visible window (no per-cell Map lookups).
+    const colLefts = new Float32Array(cols);
+    const colWidths = new Float32Array(cols);
+    let xPos = this.columnLeft(c0);
+    for (let k = 0; k < cols; k++) {
+      const c = c0 + k;
+      colLefts[k] = xPos;
+      const cw = this.getColWidth(c);
+      colWidths[k] = cw;
+      xPos += cw;
+    }
     let i = 0;
     if (this.fillProgram === 'viridis' && typeof m.getValueBuffer === 'function') {
       const vb = m.getValueBuffer();
       const stride = totalCols;
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-        buf[i++] = c; buf[i++] = r; buf[i++] = vb[r * stride + c];
+      for (let r = r0; r <= r1; r++) {
+        const yPx = r * this.rowHeight;
+        for (let k = 0; k < cols; k++) {
+          buf[i++] = colLefts[k]; buf[i++] = yPx; buf[i++] = colWidths[k]; buf[i++] = this.rowHeight;
+          buf[i++] = vb[r * stride + (c0 + k)];
+        }
       }
     } else if (this.fillProgram === 'stripe') {
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-        buf[i++] = c; buf[i++] = r; buf[i++] = (r + c) & 1;
+      for (let r = r0; r <= r1; r++) {
+        const yPx = r * this.rowHeight;
+        for (let k = 0; k < cols; k++) {
+          buf[i++] = colLefts[k]; buf[i++] = yPx; buf[i++] = colWidths[k]; buf[i++] = this.rowHeight;
+          buf[i++] = (r + (c0 + k)) & 1;
+        }
       }
     } else {
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-        buf[i++] = c; buf[i++] = r; buf[i++] = 0;
+      for (let r = r0; r <= r1; r++) {
+        const yPx = r * this.rowHeight;
+        for (let k = 0; k < cols; k++) {
+          buf[i++] = colLefts[k]; buf[i++] = yPx; buf[i++] = colWidths[k]; buf[i++] = this.rowHeight;
+          buf[i++] = 0;
+        }
       }
     }
     w.postMessage({ op: 'setView', scrollX: this.scrollX - this.rowHeaderWidth, scrollY: this.scrollY - this.colHeaderHeight });
     w.postMessage({
       op: 'setStyle',
       activeProgram: this.fillProgram,
-      cellSize: [this.colWidth, this.rowHeight],
       stripeA: (this.stripeColors && this.stripeColors.a) || [0,0,0,0],
       stripeB: (this.stripeColors && this.stripeColors.b) || [0,0,0,0],
       flatColor: (this.stripeColors && this.stripeColors.flat) || [1,1,1,1]
@@ -1647,8 +1776,8 @@ class Grid {
   _paintHeaders() {
     const ctx = this._textCtx;
     const m = this.model;
-    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
-    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, m.columnCount('body'));
+    const c0 = this.firstVisibleCol();
+    const c1 = this.lastVisibleCol();
     const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
     const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, m.rowCount('body'));
     ctx.fillStyle = this.style.colHeaderBg;
@@ -1660,8 +1789,14 @@ class Grid {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     for (let col = c0; col <= c1; col++) {
-      const x = this.rowHeaderWidth + col * this.colWidth - this.scrollX + 4;
+      const x = this.rowHeaderWidth + this.columnLeft(col) - this.scrollX + 4;
+      const cw = this.getColWidth(col);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x - 4, 0, cw, this.colHeaderHeight);
+      ctx.clip();
       ctx.fillText(String(m.data('column-header', 0, col)), x, this.colHeaderHeight / 2);
+      ctx.restore();
     }
     for (let row = r0; row <= r1; row++) {
       const y = this.colHeaderHeight + row * this.rowHeight - this.scrollY + this.rowHeight / 2;
@@ -2199,10 +2334,10 @@ async function main() {
   const m1 = new LargeModel(2e12, 2e12);
   const m2 = new StreamingModel(50);
   const m3 = new RandomTicksModel(15, 10, 60);
-  const m4 = new RandomTicksModel(80, 80, 60);
+  const m4 = new RandomTicksModel(80, 80, 60, { init: 'gradient' });
   const m5 = afterglow.makeCarsModel();
   const m6 = new LargeModel(9e15, 9e15);
-  const m7 = new RandomTicksModel(200, 200, 16, { mode: 'all' });
+  const m7 = new RandomTicksModel(200, 200, 16, { mode: 'all', init: 'gradient' });
   const m8 = new FirehoseModel(20, 10000, 1);
   const m9 = new SortableModel(afterglow.makeCarsModel(), { frozenRows: 2, frozenCols: 2 });
 
