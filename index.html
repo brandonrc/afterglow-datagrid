@@ -33,25 +33,14 @@
     .ag-tab.active::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--ag-magenta); }
     .ag-tab-content { position: relative; flex: 1; overflow: hidden; }
     .ag-grid { background: white; }
-    .ag-grid > div[style*="overflow-y"], .ag-grid > div[style*="overflow-x"] {
-      scrollbar-color: var(--ag-magenta) rgba(11,13,17,0.4);
-    }
-    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar,
-    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar {
-      width: 12px; height: 12px; background: rgba(11,13,17,0.5);
-    }
-    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar-thumb,
-    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar-thumb {
-      background: linear-gradient(180deg, rgba(217,70,239,0.85), rgba(6,182,212,0.85));
-      border-radius: 6px;
-      border: 2px solid rgba(11,13,17,0.5);
-    }
-    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar-thumb:hover,
-    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar-thumb:hover {
-      background: linear-gradient(180deg, rgba(217,70,239,1), rgba(6,182,212,1));
-    }
-    .ag-grid > div[style*="overflow-y"]::-webkit-scrollbar-corner,
-    .ag-grid > div[style*="overflow-x"]::-webkit-scrollbar-corner { background: transparent; }
+    .ag-scroll-track { position: absolute; background: rgba(11,13,17,0.65); border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05); z-index: 5; }
+    .ag-scroll-track-v { right: 3px; bottom: 16px; width: 10px; }
+    .ag-scroll-track-h { bottom: 3px; right: 16px; height: 10px; }
+    .ag-scroll-thumb { position: absolute; background: linear-gradient(135deg, var(--ag-magenta) 0%, var(--ag-cyan) 100%); border-radius: 6px; cursor: pointer; transition: filter 120ms; }
+    .ag-scroll-track-v .ag-scroll-thumb { left: 0; right: 0; min-height: 28px; }
+    .ag-scroll-track-h .ag-scroll-thumb { top: 0; bottom: 0; min-width: 28px; }
+    .ag-scroll-thumb:hover { filter: brightness(1.25); }
+    .ag-scroll-thumb:active { filter: brightness(1.4); }
     .ag-drop-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 999; }
     .ag-drop-zone { position: absolute; background: rgba(217,70,239,0.15); border: 2px dashed rgba(217,70,239,0.7); display: flex; align-items: center; justify-content: center; color: var(--ag-magenta); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; pointer-events: auto; }
     .ag-drop-zone.hover { background: rgba(217,70,239,0.45); }
@@ -1276,61 +1265,99 @@ class Grid {
     this.el.appendChild(this.overlayCanvas);
     this._textCtx = this.textCanvas.getContext('2d');
     this._overlayCtx = this.overlayCanvas.getContext('2d');
-    this.vScrollEl = document.createElement('div');
-    this.vScrollEl.style.cssText = 'position:absolute;right:0;top:' + this.colHeaderHeight + 'px;bottom:12px;width:12px;overflow-y:scroll;';
-    this.vScrollInner = document.createElement('div');
-    this.vScrollInner.style.cssText = 'width:1px;';
-    this.vScrollEl.appendChild(this.vScrollInner);
-    this.el.appendChild(this.vScrollEl);
-    this.hScrollEl = document.createElement('div');
-    this.hScrollEl.style.cssText = 'position:absolute;bottom:0;left:' + this.rowHeaderWidth + 'px;right:12px;height:12px;overflow-x:scroll;';
-    this.hScrollInner = document.createElement('div');
-    this.hScrollInner.style.cssText = 'height:1px;';
-    this.hScrollEl.appendChild(this.hScrollInner);
-    this.el.appendChild(this.hScrollEl);
+    // Custom scrollbars — always visible, drag-to-scroll, click-track-to-page,
+    // and stay in sync with scrollX/scrollY no matter how it changes.
+    this.vTrack = document.createElement('div');
+    this.vTrack.className = 'ag-scroll-track ag-scroll-track-v';
+    this.vThumb = document.createElement('div');
+    this.vThumb.className = 'ag-scroll-thumb';
+    this.vTrack.appendChild(this.vThumb);
+    this.el.appendChild(this.vTrack);
+    this.hTrack = document.createElement('div');
+    this.hTrack.className = 'ag-scroll-track ag-scroll-track-h';
+    this.hThumb = document.createElement('div');
+    this.hThumb.className = 'ag-scroll-thumb';
+    this.hTrack.appendChild(this.hThumb);
+    this.el.appendChild(this.hTrack);
+    // Track inset to leave room for the row/col headers and the opposite track.
+    this.vTrack.style.top = (this.colHeaderHeight + 2) + 'px';
+    this.hTrack.style.left = (this.rowHeaderWidth + 2) + 'px';
     this._wireInput();
   }
   _wireInput() {
-    this._lastScrollY = 0; this._lastScrollX = 0; this._lastScrollT = performance.now();
+    this._lastScrollT = performance.now();
     this._scrollVelocity = 0;
-
-    const onVScroll = () => {
-      const t = performance.now();
-      const dy = this.vScrollEl.scrollTop - this._lastScrollY;
-      this._scrollVelocity = Math.abs(dy) / Math.max(1, t - this._lastScrollT);
-      this._lastScrollY = this.vScrollEl.scrollTop;
-      this._lastScrollT = t;
-      const range = Math.max(1, this.vScrollEl.scrollHeight - this.vScrollEl.clientHeight);
-      const ratio = this.vScrollEl.scrollTop / range;
-      const max = Math.max(0, this.model.rowCount('body') * this.rowHeight - (this.cssHeight - this.colHeaderHeight));
-      this.scrollY = ratio * max;
-      this._textCache.invalidateAll();
-      this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
-      afterglow.scheduler.schedule(8, this._paintBound);
-    };
-    const onHScroll = () => {
-      const t = performance.now();
-      const dx = this.hScrollEl.scrollLeft - this._lastScrollX;
-      this._scrollVelocity = Math.abs(dx) / Math.max(1, t - this._lastScrollT);
-      this._lastScrollX = this.hScrollEl.scrollLeft;
-      this._lastScrollT = t;
-      const range = Math.max(1, this.hScrollEl.scrollWidth - this.hScrollEl.clientWidth);
-      const ratio = this.hScrollEl.scrollLeft / range;
-      const max = Math.max(0, this.totalContentWidth() - (this.cssWidth - this.rowHeaderWidth));
-      this.scrollX = ratio * max;
-      this._textCache.invalidateAll();
-      this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
-      afterglow.scheduler.schedule(8, this._paintBound);
-    };
     this._paintBound = () => this.paint();
-    this.vScrollEl.addEventListener('scroll', onVScroll);
-    this.hScrollEl.addEventListener('scroll', onHScroll);
 
     this.el.addEventListener('wheel', (e) => {
       e.preventDefault();
-      if (e.shiftKey) this.hScrollEl.scrollLeft += e.deltaY;
-      else { this.vScrollEl.scrollTop += e.deltaY; this.hScrollEl.scrollLeft += e.deltaX; }
+      if (e.shiftKey) this._setScroll(this.scrollX + e.deltaY, this.scrollY);
+      else this._setScroll(this.scrollX + e.deltaX, this.scrollY + e.deltaY);
     }, { passive: false });
+
+    // Vertical thumb drag
+    this.vThumb.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      try { this.vThumb.setPointerCapture(e.pointerId); } catch {}
+      const startY = e.clientY;
+      const startScrollY = this.scrollY;
+      const trackH = this.vTrack.clientHeight;
+      const thumbH = this.vThumb.clientHeight;
+      const trackable = Math.max(1, trackH - thumbH);
+      const yMax = this._maxScrollY();
+      const move = (ev) => {
+        const dy = ev.clientY - startY;
+        this._setScroll(this.scrollX, startScrollY + (dy / trackable) * yMax);
+      };
+      const up = () => {
+        try { this.vThumb.releasePointerCapture(e.pointerId); } catch {}
+        this.vThumb.removeEventListener('pointermove', move);
+        this.vThumb.removeEventListener('pointerup', up);
+      };
+      this.vThumb.addEventListener('pointermove', move);
+      this.vThumb.addEventListener('pointerup', up);
+    });
+
+    // Horizontal thumb drag
+    this.hThumb.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      try { this.hThumb.setPointerCapture(e.pointerId); } catch {}
+      const startX = e.clientX;
+      const startScrollX = this.scrollX;
+      const trackW = this.hTrack.clientWidth;
+      const thumbW = this.hThumb.clientWidth;
+      const trackable = Math.max(1, trackW - thumbW);
+      const xMax = this._maxScrollX();
+      const move = (ev) => {
+        const dx = ev.clientX - startX;
+        this._setScroll(startScrollX + (dx / trackable) * xMax, this.scrollY);
+      };
+      const up = () => {
+        try { this.hThumb.releasePointerCapture(e.pointerId); } catch {}
+        this.hThumb.removeEventListener('pointermove', move);
+        this.hThumb.removeEventListener('pointerup', up);
+      };
+      this.hThumb.addEventListener('pointermove', move);
+      this.hThumb.addEventListener('pointerup', up);
+    });
+
+    // Click on track (not on thumb) → page-jump
+    this.vTrack.addEventListener('pointerdown', (e) => {
+      if (e.target !== this.vTrack) return;
+      const r = this.vTrack.getBoundingClientRect();
+      const click = e.clientY - r.top;
+      const thumbTop = parseFloat(this.vThumb.style.top || '0');
+      const page = Math.max(40, this.cssHeight - this.colHeaderHeight - 40);
+      this._setScroll(this.scrollX, this.scrollY + (click < thumbTop ? -page : page));
+    });
+    this.hTrack.addEventListener('pointerdown', (e) => {
+      if (e.target !== this.hTrack) return;
+      const r = this.hTrack.getBoundingClientRect();
+      const click = e.clientX - r.left;
+      const thumbLeft = parseFloat(this.hThumb.style.left || '0');
+      const page = Math.max(40, this.cssWidth - this.rowHeaderWidth - 40);
+      this._setScroll(this.scrollX + (click < thumbLeft ? -page : page), this.scrollY);
+    });
 
     this.el.addEventListener('pointermove', (ev) => {
       if (this._dragSelectAnchor || this._resizeAnchor) return;
@@ -1342,7 +1369,7 @@ class Grid {
 
     this.el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      if (e.target === this.vScrollEl || e.target === this.hScrollEl || e.target === this.vScrollInner || e.target === this.hScrollInner) return;
+      if (e.target === this.vTrack || e.target === this.vThumb || e.target === this.hTrack || e.target === this.hThumb) return;
       this.el.focus();
       const rect = this.el.getBoundingClientRect();
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
@@ -1374,10 +1401,7 @@ class Grid {
           this.el.removeEventListener('pointerup', up);
           try { this.el.releasePointerCapture(e.pointerId); } catch {}
           this.el.style.cursor = '';
-          const totalH = Math.min(33000000, this.model.rowCount('body') * this.rowHeight);
-          const totalW = Math.min(33000000, this.totalContentWidth());
-          if (this.vScrollInner) this.vScrollInner.style.height = totalH + 'px';
-          if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
+          this._updateScrollbars();
         };
         this.el.addEventListener('pointermove', move);
         this.el.addEventListener('pointerup', up);
@@ -1512,9 +1536,56 @@ class Grid {
   _afterColumnGeometryChange() {
     this._textCache.invalidateAll();
     this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
-    const totalW = Math.min(33000000, this.totalContentWidth());
-    if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
+    this._updateScrollbars();
     afterglow.scheduler.schedule(8, this._paintBound);
+  }
+  _maxScrollX() {
+    return Math.max(0, this.totalContentWidth() - (this.cssWidth - this.rowHeaderWidth));
+  }
+  _maxScrollY() {
+    return Math.max(0, this.model.rowCount('body') * this.rowHeight - (this.cssHeight - this.colHeaderHeight));
+  }
+  _setScroll(x, y) {
+    const newX = Math.max(0, Math.min(this._maxScrollX(), x));
+    const newY = Math.max(0, Math.min(this._maxScrollY(), y));
+    if (newX === this.scrollX && newY === this.scrollY) return;
+    const t = performance.now();
+    const dt = Math.max(1, t - this._lastScrollT);
+    this._scrollVelocity = (Math.abs(newX - this.scrollX) + Math.abs(newY - this.scrollY)) / dt;
+    this._lastScrollT = t;
+    this.scrollX = newX;
+    this.scrollY = newY;
+    this._textCache.invalidateAll();
+    this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
+    this._updateScrollbars();
+    afterglow.scheduler.schedule(8, this._paintBound);
+  }
+  _updateScrollbars() {
+    if (!this.vTrack || !this.cssWidth) return;
+    const vViewport = Math.max(0, this.cssHeight - this.colHeaderHeight);
+    const vTotal = Math.max(this.model.rowCount('body') * this.rowHeight, vViewport);
+    const trackH = Math.max(0, this.vTrack.clientHeight);
+    if (trackH > 0) {
+      const thumbH = Math.max(28, Math.floor(trackH * vViewport / Math.max(vTotal, 1)));
+      const trackable = Math.max(0, trackH - thumbH);
+      const yMax = this._maxScrollY();
+      const top = yMax > 0 ? Math.round(trackable * (this.scrollY / yMax)) : 0;
+      this.vThumb.style.top = top + 'px';
+      this.vThumb.style.height = thumbH + 'px';
+      this.vThumb.style.display = (vViewport >= vTotal - 1) ? 'none' : 'block';
+    }
+    const hViewport = Math.max(0, this.cssWidth - this.rowHeaderWidth);
+    const hTotal = Math.max(this.totalContentWidth(), hViewport);
+    const trackW = Math.max(0, this.hTrack.clientWidth);
+    if (trackW > 0) {
+      const thumbW = Math.max(28, Math.floor(trackW * hViewport / Math.max(hTotal, 1)));
+      const trackable = Math.max(0, trackW - thumbW);
+      const xMax = this._maxScrollX();
+      const left = xMax > 0 ? Math.round(trackable * (this.scrollX / xMax)) : 0;
+      this.hThumb.style.left = left + 'px';
+      this.hThumb.style.width = thumbW + 'px';
+      this.hThumb.style.display = (hViewport >= hTotal - 1) ? 'none' : 'block';
+    }
   }
   _hitResizeEdge(px, py) {
     // Column-edge: pointer is in column-header band, within 4px of any visible column boundary.
@@ -1591,10 +1662,10 @@ class Grid {
     this._textCtx.resetTransform?.(); this._textCtx.scale(this.dpr, this.dpr);
     this._overlayCtx.resetTransform?.(); this._overlayCtx.scale(this.dpr, this.dpr);
     this._textCache.invalidateAll();
-    const totalH = Math.min(33000000, this.model.rowCount('body') * this.rowHeight);
-    const totalW = Math.min(33000000, this.totalContentWidth());
-    if (this.vScrollInner) this.vScrollInner.style.height = totalH + 'px';
-    if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
+    // Clamp scroll into the new bounds and refresh the custom scrollbars.
+    this.scrollX = Math.max(0, Math.min(this._maxScrollX(), this.scrollX));
+    this.scrollY = Math.max(0, Math.min(this._maxScrollY(), this.scrollY));
+    this._updateScrollbars();
     // Resize is a strong "everything must repaint" signal — clear any stale
     // scroll velocity so adaptive fidelity doesn't drop the text layer.
     this._scrollVelocity = 0;
