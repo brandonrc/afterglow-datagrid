@@ -455,6 +455,80 @@
         expect(sn.sizes[1]).toBeCloseTo(0.5);
       });
     });
+
+    describe('Scroll preserves tile cache (Chris bit-blit principle)', () => {
+      it('scrolling does NOT invalidate already-allocated tiles', async () => {
+        const ag = AG();
+        const m = ag.makeCarsModel();
+        const g = new (ag.Grid)({ model: m });
+        document.body.appendChild(g.el);
+        g.el.style.cssText += 'width:800px;height:400px;position:fixed;left:-9999px;';
+        g.resize(800, 400);
+        g.paint();
+        // Allocate tiles by paint
+        const beforeCount = g._textCache._tiles.size;
+        const sampleKey = beforeCount > 0 ? g._textCache._tiles.keys().next().value : null;
+        const sampleTile = sampleKey ? g._textCache._tiles.get(sampleKey) : null;
+        // Mark all tiles clean so we can detect re-renders.
+        for (const t of g._textCache._tiles.values()) t.dirty = false;
+        // Scroll. Pre-Chris-feedback, this would invalidateAll().
+        g._setScroll(g.scrollX, g.scrollY + 50);
+        // Tile cache entries that survived must remain `dirty: false`.
+        if (sampleTile && g._textCache._tiles.has(sampleKey)) {
+          expect(g._textCache._tiles.get(sampleKey).dirty).toBe(false);
+        }
+        // Tile count may grow when newly-visible tiles allocate, but it must
+        // not shrink (that'd indicate invalidateAll was called).
+        expect(g._textCache._tiles.size >= beforeCount).toBe(true);
+        g.destroy();
+        g.el.remove();
+      });
+      it('scrolling re-blits surviving tiles via drawImage rather than re-rendering all', async () => {
+        const ag = AG();
+        const m = ag.makeCarsModel();
+        const g = new (ag.Grid)({ model: m });
+        document.body.appendChild(g.el);
+        g.el.style.cssText += 'width:800px;height:400px;position:fixed;left:-9999px;';
+        g.resize(800, 400);
+        g.paint();
+        // Patch _renderTile to count calls
+        const origRender = g._renderTile.bind(g);
+        let renderCalls = 0;
+        g._renderTile = function(tx, ty, tile) { renderCalls++; return origRender(tx, ty, tile); };
+        renderCalls = 0;
+        g._setScroll(g.scrollX, g.scrollY + 20);
+        g.paint();
+        // After a small scroll within the existing visible window, no tiles
+        // newly become visible → renderCalls should be 0 (all survived).
+        expect(renderCalls).toBe(0);
+        g.destroy();
+        g.el.remove();
+      });
+    });
+
+    describe('Renderer is column-major (Chris column-clip principle)', () => {
+      it('_renderTile uses one save/restore per column, not per cell', async () => {
+        const ag = AG();
+        const m = ag.makeCarsModel();
+        const g = new (ag.Grid)({ model: m });
+        document.body.appendChild(g.el);
+        g.el.style.cssText += 'width:800px;height:400px;position:fixed;left:-9999px;';
+        g.resize(800, 400);
+        // Pick a tile that should render multiple cells in multiple columns.
+        const tile = g._textCache.get(0, 0);
+        tile.dirty = true;
+        let saveCalls = 0;
+        const origSave = tile.ctx.save.bind(tile.ctx);
+        tile.ctx.save = () => { saveCalls++; origSave(); };
+        g._renderTile(0, 0, tile);
+        // Tile (0,0) at colWidth=64 covers cols 0..3 in a tile of 256px (4 cols).
+        // Cars data has 9 cols, all <=64px wide. So 4 visible columns in tile.
+        // 4 cols × N rows used to mean 4N saves; now it should be 4 saves.
+        expect(saveCalls <= 8).toBe(true);
+        g.destroy();
+        g.el.remove();
+      });
+    });
     // === END TESTS ===
 
     run();

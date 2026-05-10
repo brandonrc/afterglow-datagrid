@@ -1611,7 +1611,11 @@ class Grid {
     this._lastScrollT = t;
     this.scrollX = newX;
     this.scrollY = newY;
-    this._textCache.invalidateAll();
+    // NOTE: do NOT invalidate the tile cache on scroll. Tile keys are
+    // content-addressed by (tx, ty) in absolute grid coords — surviving
+    // tiles are still correct after a scroll; they just paint at a different
+    // on-screen offset via forEachVisible + drawImage. Throwing them away
+    // here was the "scroll re-renders everything" bug Chris pointed out.
     this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
     this._updateScrollbars();
     afterglow.scheduler.schedule(8, this._paintBound);
@@ -1816,34 +1820,39 @@ class Grid {
     tCtx.clearRect(0, 0, ts, ts);
     const m = this.model;
     const r = this.renderer;
-    tCtx.font = typeof r.font === 'string' ? r.font : '12px ui-sans-serif, sans-serif';
+    const font = typeof r.font === 'string' ? r.font : '12px ui-sans-serif, sans-serif';
+    tCtx.font = font;
     tCtx.textBaseline = 'middle';
     const r0 = Math.max(0, Math.floor((ty * ts) / this.rowHeight));
     const r1 = Math.min(m.rowCount('body') - 1, Math.floor(((ty + 1) * ts - 1) / this.rowHeight));
     const c0 = Math.max(0, this.columnAtX(tx * ts));
     const c1 = Math.min(m.columnCount('body') - 1, this.columnAtX((tx + 1) * ts - 1));
-    for (let row = r0; row <= r1; row++) {
-      for (let col = c0; col <= c1; col++) {
+    const align = r.align || 'left';
+    // Column-major: clip once to each column's (x, w) for the full tile height.
+    // Cells write into their (0, 0, colWidth, rowHeight) coord space and never
+    // bleed into neighbors. Replaces ~N×save/clip/restore per tile (one per
+    // cell) with one save/clip/restore per column — Chris's point that
+    // "clipping rects are expensive to do cell-wise".
+    for (let col = c0; col <= c1; col++) {
+      const cw = this.getColWidth(col);
+      const colX = this.columnLeft(col) - tx * ts;
+      tCtx.save();
+      tCtx.beginPath();
+      tCtx.rect(colX, 0, cw, ts);
+      tCtx.clip();
+      tCtx.textAlign = align;
+      let dx = colX + 4;
+      if (align === 'right') dx = colX + cw - 4;
+      else if (align === 'center') dx = colX + cw / 2;
+      for (let row = r0; row <= r1; row++) {
         const v = m.data('body', row, col);
         const text = typeof r.format === 'function' ? r.format(v) : String(v);
         const color = typeof r.color === 'function' ? r.color(v) : r.color;
         tCtx.fillStyle = color;
-        const cw = this.getColWidth(col);
-        const x = this.columnLeft(col) - tx * ts;
         const y = row * this.rowHeight - ty * ts + this.rowHeight / 2;
-        const align = r.align || 'left';
-        tCtx.textAlign = align;
-        let dx = x + 4;
-        if (align === 'right') dx = x + cw - 4;
-        else if (align === 'center') dx = x + cw / 2;
-        // Clip to cell bounds so long values don't bleed into neighbors.
-        tCtx.save();
-        tCtx.beginPath();
-        tCtx.rect(x, row * this.rowHeight - ty * ts, cw, this.rowHeight);
-        tCtx.clip();
         tCtx.fillText(text, dx, y);
-        tCtx.restore();
       }
+      tCtx.restore();
     }
     tile.dirty = false;
   }
@@ -1949,22 +1958,13 @@ class Grid {
     }
   }
   paint() {
-    const fast = this._scrollVelocity > 1.5;
+    // No more adaptive-fidelity text-skip. With the tile cache surviving
+    // scrolls (Step 1), text paint is a handful of drawImage calls per frame.
+    // The old "skip text during fast scroll" path made the grid feel like it
+    // wasn't keeping up with the scrollbar; removing it = scroll feels snappy.
     if (this._dirty.fill) this.paintFill();
-    if (!fast && this._dirty.text) this.paintText();
+    if (this._dirty.text) this.paintText();
     if (this._dirty.overlay) this.paintOverlay();
-    if (fast && this._dirty.text && !this._idleTextScheduled) {
-      this._idleTextScheduled = true;
-      const tryRefresh = () => {
-        if (this._scrollVelocity <= 1.5) {
-          this._idleTextScheduled = false;
-          afterglow.scheduler.schedule(6, this._paintBound);
-        } else {
-          afterglow.scheduler.scheduleIdle(tryRefresh);
-        }
-      };
-      afterglow.scheduler.scheduleIdle(tryRefresh);
-    }
   }
 }
 afterglow.Grid = Grid;
@@ -2590,7 +2590,17 @@ afterglow.bench = async (seconds = 5) => {
   const grids = afterglow._allGrids || [];
   if (!grids.length) { console.warn('afterglow: no grids registered'); return; }
   console.log('Benching ' + grids.length + ' grids for ' + seconds + 's...');
-  const results = grids.map(g => ({ title: g.__title || '?', frames: [] }));
+  console.log('(Per Chris\'s feedback, also tracks tile-cache hit rate so we can verify the bit-blit fix.)');
+  const results = grids.map(g => {
+    // Patch _renderTile to count cache misses (re-renders)
+    g.__bench = { renders: 0, paints: 0 };
+    if (!g.__benchPatched) {
+      const orig = g._renderTile.bind(g);
+      g._renderTile = function(tx, ty, tile) { g.__bench.renders++; return orig(tx, ty, tile); };
+      g.__benchPatched = true;
+    }
+    return { title: g.__title || '?', frames: [], grid: g };
+  });
   const stop = performance.now() + seconds * 1000;
   while (performance.now() < stop) {
     let frameStart = performance.now();
@@ -2598,6 +2608,7 @@ afterglow.bench = async (seconds = 5) => {
       const g = grids[i];
       g.scrollY += 20;
       g._dirty.fill = g._dirty.text = g._dirty.overlay = true;
+      g.__bench.paints++;
       g.paint();
       const t = performance.now();
       results[i].frames.push(t - frameStart);
@@ -2611,7 +2622,9 @@ afterglow.bench = async (seconds = 5) => {
     const avg = r.frames.reduce((a, b) => a + b, 0) / r.frames.length;
     const p50 = sorted[Math.floor(sorted.length * 0.50)];
     const p99 = sorted[Math.floor(sorted.length * 0.99)];
-    console.log(r.title + ': avg=' + avg.toFixed(2) + 'ms p50=' + p50.toFixed(2) + ' p99=' + p99.toFixed(2));
+    const b = r.grid.__bench;
+    const tilesPerPaint = b.paints > 0 ? (b.renders / b.paints).toFixed(2) : 'n/a';
+    console.log(r.title + ': avg=' + avg.toFixed(2) + 'ms p50=' + p50.toFixed(2) + ' p99=' + p99.toFixed(2) + ' | tiles_rendered/paint=' + tilesPerPaint + ' (lower is better; 0 = pure bit-blit)');
   }
 };
 
