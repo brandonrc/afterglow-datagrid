@@ -2263,32 +2263,35 @@ const DropOverlay = {
     return 'bottom';
   },
 
-  // Apply hysteresis: only allow leaving currentZone if pointer has crossed
-  // the boundary by HYSTERESIS in normalized units.
+  // Apply hysteresis at zone boundaries. Direction-of-motion rules:
+  //   center -> any edge:   require minD <= ext - h to commit (must be clearly past inner boundary)
+  //   edge   -> center:     require minD >= ext + h
+  //   edge A -> edge B:     require map[B] < map[A] - h (B is clearly closer than A)
   _zoneWithHysteresis(pane, x, y, prev) {
     const candidate = this._zoneAt(pane, x, y);
     if (!prev || prev.tabNode !== pane.tabNode) return candidate;
     if (candidate === prev.kind) return candidate;
-    // Stickiness: stay in prev unless we've cleared the threshold.
     const R = pane.rect;
-    const u = (x - R.x) / R.w;
-    const v = (y - R.y) / R.h;
+    const u = (x - R.x) / R.w, v = (y - R.y) / R.h;
     const dL = u, dR = 1 - u, dT = v, dB = 1 - v;
+    const minD = Math.min(dL, dR, dT, dB);
     const ext = this.CENTER_EXTENT;
     const h = this.HYSTERESIS;
     if (prev.kind === 'center') {
-      if (Math.min(dL, dR, dT, dB) >= ext - h) return 'center';
-    } else {
-      const map = { left: dL, right: dR, top: dT, bottom: dB };
-      const prevD = map[prev.kind];
-      if (prevD < ext && prevD === Math.min(dL, dR, dT, dB) - h * 0) {
-        return prev.kind;
-      }
-      // Only leave if candidate edge's d is at least HYSTERESIS smaller than prev's d.
-      const candD = candidate === 'center' ? Math.min(dL, dR, dT, dB) : map[candidate];
-      if (Math.abs(prevD - candD) < h) return prev.kind;
+      // Stay in center unless we've crossed clearly into an edge wedge.
+      if (minD >= ext - h) return 'center';
+      return candidate;
     }
-    return candidate;
+    // prev is an edge.
+    if (candidate === 'center') {
+      // Commit to center only when comfortably past the boundary.
+      if (minD >= ext + h) return 'center';
+      return prev.kind;
+    }
+    // candidate is a different edge: only switch when it's clearly closer.
+    const map = { left: dL, right: dR, top: dT, bottom: dB };
+    if (map[candidate] < map[prev.kind] - h) return candidate;
+    return prev.kind;
   },
 
   _previewRectFor(pane, kind) {
@@ -2397,23 +2400,6 @@ const DropOverlay = {
 
   _performDrop(zone) {
     const targetTabNode = zone.tabNode;
-    if (!targetTabNode) return;
-    const tab = this.draggingTab;
-    const fromNode = this.fromNode;
-    if (zone.kind === 'center') {
-      if (targetTabNode === fromNode) return;
-      fromNode.removeTab(tab);
-      targetTabNode.addTab(tab);
-    } else {
-      fromNode.removeTab(tab);
-      const newNode = new TabNode();
-      newNode.addTab(tab);
-      this._splitInto(targetTabNode, newNode, zone.kind);
-    }
-    if (fromNode.tabs.length === 0) this._collapse(fromNode);
-  },
-  _performDrop(zone) {
-    const targetTabNode = afterglow._findTabNodeByEl(zone.node);
     if (!targetTabNode) return;
     const tab = this.draggingTab;
     const fromNode = this.fromNode;
