@@ -2005,10 +2005,15 @@ class TabNode {
   _wireTab(tEl, tab, i) {
     tEl.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      e.preventDefault();
+      // Activate the tab visually right away.
       this.setActive(i);
+      // IMPORTANT: do NOT attach move/up to tEl. setActive() above re-renders
+      // the strip and tEl is detached from the DOM before any pointermove
+      // would fire. Use window-level listeners instead so drag survives
+      // arbitrary DOM mutations.
       const downX = e.clientX, downY = e.clientY;
       let dragging = false;
-      try { tEl.setPointerCapture(e.pointerId); } catch {}
       const move = (ev) => {
         if (!dragging && (Math.abs(ev.clientX - downX) > 5 || Math.abs(ev.clientY - downY) > 5)) {
           dragging = true;
@@ -2017,13 +2022,12 @@ class TabNode {
         if (dragging) DropOverlay.update(ev.clientX, ev.clientY);
       };
       const up = (ev) => {
-        try { tEl.releasePointerCapture(e.pointerId); } catch {}
-        tEl.removeEventListener('pointermove', move);
-        tEl.removeEventListener('pointerup', up);
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
         if (dragging) DropOverlay.end(ev.clientX, ev.clientY);
       };
-      tEl.addEventListener('pointermove', move);
-      tEl.addEventListener('pointerup', up);
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
     });
   }
 }
@@ -2088,15 +2092,16 @@ class SplitNode {
   _wireSplitter(splitter, i) {
     splitter.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      splitter.setPointerCapture(e.pointerId);
       const rect = this.el.getBoundingClientRect();
       const startPos = this.orientation === 'h' ? e.clientX : e.clientY;
       const startSizes = [...this.sizes];
       const total = this.orientation === 'h' ? rect.width : rect.height;
       const wraps = this.el.querySelectorAll(':scope > .ag-child');
+      document.body.style.cursor = this.orientation === 'h' ? 'col-resize' : 'row-resize';
+      document.body.style.userSelect = 'none';
       const move = (ev) => {
         const cur = this.orientation === 'h' ? ev.clientX : ev.clientY;
-        const d = (cur - startPos) / total;
+        const d = (cur - startPos) / Math.max(1, total);
         const left = i, right = i + 1;
         const min = 0.05;
         let sL = startSizes[left] + d;
@@ -2104,17 +2109,18 @@ class SplitNode {
         if (sL < min) { sR = startSizes[left] + startSizes[right] - min; sL = min; }
         if (sR < min) { sL = startSizes[left] + startSizes[right] - min; sR = min; }
         this.sizes[left] = sL; this.sizes[right] = sR;
-        wraps[left].style.flex = sL + ' 0 0';
-        wraps[right].style.flex = sR + ' 0 0';
+        if (wraps[left]) wraps[left].style.flex = sL + ' 0 0';
+        if (wraps[right]) wraps[right].style.flex = sR + ' 0 0';
         this._propagateResize();
       };
-      const up = (ev) => {
-        try { splitter.releasePointerCapture(e.pointerId); } catch {}
-        splitter.removeEventListener('pointermove', move);
-        splitter.removeEventListener('pointerup', up);
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
       };
-      splitter.addEventListener('pointermove', move);
-      splitter.addEventListener('pointerup', up);
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
     });
   }
 }
