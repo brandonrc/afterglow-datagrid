@@ -83,6 +83,10 @@
     .ag-tab.dragging { opacity: 0.35; border-right-color: var(--ag-magenta); }
     body.ag-dragging, body.ag-dragging * { cursor: grabbing !important; user-select: none; }
     body.ag-dragging .ag-hud { opacity: 0.3; transition: opacity 120ms ease; }
+    /* While a tab drag is active, kill all pointer/wheel events on grid bodies
+       so wheel deltas during the drag don't accidentally scroll the underlying
+       grid. Window-level drag listeners still fire because they bypass DOM. */
+    body.ag-dragging .ag-grid { pointer-events: none; }
     .ag-hud { transition: opacity 120ms ease; }
     .ag-drag-hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 6px 10px; background: rgba(11,13,17,0.85); border: 1px solid var(--ag-border); border-radius: 4px; font: 11px ui-monospace, Menlo, monospace; color: var(--ag-fg); z-index: 1002; }
     .ag-drag-hint kbd { background: var(--ag-panel); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--ag-border); font-family: inherit; }
@@ -1350,14 +1354,15 @@ class Grid {
       e.preventDefault(); e.stopPropagation();
       try { this.vThumb.setPointerCapture(e.pointerId); } catch {}
       const startY = e.clientY;
-      const startScrollY = this.scrollY;
       const trackH = this.vTrack.clientHeight;
       const thumbH = this.vThumb.clientHeight;
       const trackable = Math.max(1, trackH - thumbH);
       const yMax = this._maxScrollY();
+      const startFrac = this._fracFromScroll(this.scrollY, yMax);
       const move = (ev) => {
         const dy = ev.clientY - startY;
-        this._setScroll(this.scrollX, startScrollY + (dy / trackable) * yMax);
+        const newFrac = startFrac + dy / trackable;
+        this._setScroll(this.scrollX, this._scrollFromFrac(newFrac, yMax));
       };
       const up = () => {
         try { this.vThumb.releasePointerCapture(e.pointerId); } catch {}
@@ -1373,14 +1378,15 @@ class Grid {
       e.preventDefault(); e.stopPropagation();
       try { this.hThumb.setPointerCapture(e.pointerId); } catch {}
       const startX = e.clientX;
-      const startScrollX = this.scrollX;
       const trackW = this.hTrack.clientWidth;
       const thumbW = this.hThumb.clientWidth;
       const trackable = Math.max(1, trackW - thumbW);
       const xMax = this._maxScrollX();
+      const startFrac = this._fracFromScroll(this.scrollX, xMax);
       const move = (ev) => {
         const dx = ev.clientX - startX;
-        this._setScroll(startScrollX + (dx / trackable) * xMax, this.scrollY);
+        const newFrac = startFrac + dx / trackable;
+        this._setScroll(this._scrollFromFrac(newFrac, xMax), this.scrollY);
       };
       const up = () => {
         try { this.hThumb.releasePointerCapture(e.pointerId); } catch {}
@@ -1610,6 +1616,24 @@ class Grid {
     this._updateScrollbars();
     afterglow.scheduler.schedule(8, this._paintBound);
   }
+  // For grids whose total content > 1M px, use a log mapping for the thumb
+  // position so single wheel ticks visibly move the thumb. Linear stays for
+  // normal-sized grids. Symmetric: scrollFromFrac inverts whichever mapping
+  // _updateScrollbars used so drag-thumb keeps its end-to-end semantics.
+  _useLogThumb(maxScroll) { return maxScroll > 1e6; }
+  _fracFromScroll(scroll, maxScroll) {
+    if (maxScroll <= 0) return 0;
+    return this._useLogThumb(maxScroll)
+      ? Math.log10(1 + Math.max(0, scroll)) / Math.log10(1 + maxScroll)
+      : Math.max(0, scroll) / maxScroll;
+  }
+  _scrollFromFrac(frac, maxScroll) {
+    if (maxScroll <= 0) return 0;
+    const f = Math.max(0, Math.min(1, frac));
+    return this._useLogThumb(maxScroll)
+      ? Math.pow(10, f * Math.log10(1 + maxScroll)) - 1
+      : f * maxScroll;
+  }
   _updateScrollbars() {
     if (!this.vTrack || !this.cssWidth) return;
     const vViewport = Math.max(0, this.cssHeight - this.colHeaderHeight);
@@ -1619,7 +1643,7 @@ class Grid {
       const thumbH = Math.max(28, Math.floor(trackH * vViewport / Math.max(vTotal, 1)));
       const trackable = Math.max(0, trackH - thumbH);
       const yMax = this._maxScrollY();
-      const top = yMax > 0 ? Math.round(trackable * (this.scrollY / yMax)) : 0;
+      const top = Math.round(trackable * this._fracFromScroll(this.scrollY, yMax));
       this.vThumb.style.top = top + 'px';
       this.vThumb.style.height = thumbH + 'px';
       this.vThumb.style.display = (vViewport >= vTotal - 1) ? 'none' : 'block';
@@ -1631,7 +1655,7 @@ class Grid {
       const thumbW = Math.max(28, Math.floor(trackW * hViewport / Math.max(hTotal, 1)));
       const trackable = Math.max(0, trackW - thumbW);
       const xMax = this._maxScrollX();
-      const left = xMax > 0 ? Math.round(trackable * (this.scrollX / xMax)) : 0;
+      const left = Math.round(trackable * this._fracFromScroll(this.scrollX, xMax));
       this.hThumb.style.left = left + 'px';
       this.hThumb.style.width = thumbW + 'px';
       this.hThumb.style.display = (hViewport >= hTotal - 1) ? 'none' : 'block';
