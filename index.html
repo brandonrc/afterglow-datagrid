@@ -1349,6 +1349,14 @@ class Grid {
       }
     });
 
+    this.el.addEventListener('dblclick', (e) => {
+      const rect = this.el.getBoundingClientRect();
+      const px = e.clientX - rect.left, py = e.clientY - rect.top;
+      if (py < this.colHeaderHeight && px >= this.rowHeaderWidth) {
+        this._autoSizeColumns();
+      }
+    });
+
     this.el.addEventListener('keydown', (e) => {
       if (!this.cursor) return;
       let { row, col } = this.cursor;
@@ -1370,6 +1378,38 @@ class Grid {
       this._dirty.overlay = true;
       afterglow.scheduler.schedule(8, this._paintBound);
     });
+  }
+  _autoSizeColumns() {
+    const ctx = this._textCtx;
+    const r = this.renderer;
+    const m = this.model;
+    const r0 = Geometry.firstVisibleRow(this.scrollY, this.rowHeight);
+    const r1 = Geometry.lastVisibleRow(this.scrollY, this.rowHeight, this.cssHeight - this.colHeaderHeight, m.rowCount('body'));
+    const c0 = Geometry.firstVisibleCol(this.scrollX, this.colWidth);
+    const c1 = Geometry.lastVisibleCol(this.scrollX, this.colWidth, this.cssWidth - this.rowHeaderWidth, m.columnCount('body'));
+    ctx.save();
+    let maxW = 32;
+    ctx.font = typeof r.font === 'string' ? r.font : '12px ui-sans-serif, sans-serif';
+    for (let row = r0; row <= r1; row++) {
+      for (let col = c0; col <= c1; col++) {
+        const v = m.data('body', row, col);
+        const text = typeof r.format === 'function' ? r.format(v) : String(v);
+        const w = ctx.measureText(text).width;
+        if (w > maxW) maxW = w;
+      }
+    }
+    ctx.font = '12px ui-sans-serif, sans-serif';
+    for (let col = c0; col <= c1; col++) {
+      const w = ctx.measureText(String(m.data('column-header', 0, col))).width;
+      if (w > maxW) maxW = w;
+    }
+    ctx.restore();
+    this.colWidth = Math.min(800, Math.max(32, Math.ceil(maxW) + 14));
+    this._textCache.invalidateAll();
+    this._dirty.fill = this._dirty.text = this._dirty.overlay = true;
+    const totalW = Math.min(33000000, this.model.columnCount('body') * this.colWidth);
+    if (this.hScrollInner) this.hScrollInner.style.width = totalW + 'px';
+    afterglow.scheduler.schedule(8, this._paintBound);
   }
   _hitResizeEdge(px, py) {
     // Column-edge: pointer is in column-header band, within 4px of any visible column boundary.
