@@ -2212,23 +2212,28 @@ const DropOverlay = {
     const orientation = (dir === 'left' || dir === 'right') ? 'h' : 'v';
     const before = (dir === 'left' || dir === 'top');
     const parent = target.parent;
+    // Capture the root mount BEFORE we start moving DOM around — once we touch
+    // target's wrapper, target.el.parentElement may no longer be useful.
+    const rootMount = parent ? null : target.el.parentElement;
     const split = new SplitNode(orientation);
-    if (before) { split.children = [newNode, target]; }
-    else        { split.children = [target, newNode]; }
-    split.children.forEach(c => c.parent = split);
-    split.sizes = [0.5, 0.5];
+    // Splice into the tree first so addChild() detaching target's old DOM is
+    // safe — its old wrapper will be cleared by parent._render() below.
     if (parent) {
       const idx = parent.children.indexOf(target);
       parent.children[idx] = split;
       split.parent = parent;
+    }
+    // addChild sets each child's parent and re-renders split; this builds the
+    // split's inner DOM (wrappers + target.el + newNode.el + a splitter).
+    if (before) { split.addChild(newNode); split.addChild(target); }
+    else        { split.addChild(target); split.addChild(newNode); }
+    split.sizes = [0.5, 0.5];
+    split._render();
+    if (parent) {
       parent._render();
-    } else {
-      const mount = target.el.parentElement;
-      if (mount) {
-        mount.innerHTML = '';
-        mount.appendChild(split.el);
-        split._render();
-      }
+    } else if (rootMount) {
+      rootMount.innerHTML = '';
+      rootMount.appendChild(split.el);
     }
   },
   _collapse(emptyNode) {
