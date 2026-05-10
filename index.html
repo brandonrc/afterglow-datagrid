@@ -41,10 +41,50 @@
     .ag-scroll-track-h .ag-scroll-thumb { top: 0; bottom: 0; min-width: 28px; }
     .ag-scroll-thumb:hover { filter: brightness(1.25); }
     .ag-scroll-thumb:active { filter: brightness(1.4); }
-    .ag-drop-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 999; }
-    .ag-drop-zone { position: absolute; background: rgba(217,70,239,0.15); border: 2px dashed rgba(217,70,239,0.7); display: flex; align-items: center; justify-content: center; color: var(--ag-magenta); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; pointer-events: auto; }
-    .ag-drop-zone.hover { background: rgba(217,70,239,0.45); }
-    .ag-drag-hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 6px 10px; background: rgba(11,13,17,0.85); border: 1px solid var(--ag-border); border-radius: 4px; font: 11px ui-monospace, Menlo, monospace; color: var(--ag-fg); z-index: 1000; }
+    .ag-drop-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 999; contain: strict; isolation: isolate; }
+    .ag-drop-preview {
+      --x: 0px; --y: 0px; --w: 0px; --h: 0px;
+      position: absolute; top: 0; left: 0; width: var(--w); height: var(--h);
+      transform: translate3d(var(--x), var(--y), 0);
+      background: rgba(217,70,239,0.18);
+      border: 1px solid rgba(6,182,212,0.55);
+      border-radius: 6px;
+      box-shadow: inset 0 0 0 1px rgba(217,70,239,0.10), 0 0 24px rgba(217,70,239,0.18);
+      backdrop-filter: blur(2px) saturate(1.1);
+      -webkit-backdrop-filter: blur(2px) saturate(1.1);
+      opacity: 0;
+      will-change: transform, width, height, opacity;
+      transition: transform 90ms cubic-bezier(.2,.8,.2,1), width 90ms cubic-bezier(.2,.8,.2,1), height 90ms cubic-bezier(.2,.8,.2,1), opacity 120ms ease;
+    }
+    .ag-drop-preview.visible { opacity: 1; }
+    .ag-drop-preview.noop { opacity: 0.06; border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+    .ag-drop-preview[data-zone="left"]::before, .ag-drop-preview[data-zone="right"]::before, .ag-drop-preview[data-zone="top"]::before, .ag-drop-preview[data-zone="bottom"]::before { content: ''; position: absolute; background: var(--ag-magenta); box-shadow: 0 0 12px var(--ag-magenta); border-radius: 2px; }
+    .ag-drop-preview[data-zone="left"]::before   { top: 6px; bottom: 6px; right: 0;  width: 2px; }
+    .ag-drop-preview[data-zone="right"]::before  { top: 6px; bottom: 6px; left: 0;   width: 2px; }
+    .ag-drop-preview[data-zone="top"]::before    { left: 6px; right: 6px; bottom: 0; height: 2px; }
+    .ag-drop-preview[data-zone="bottom"]::before { left: 6px; right: 6px; top: 0;    height: 2px; }
+    .ag-drop-preview[data-zone="center"]::after { content: '+'; position: absolute; top: 4px; left: 8px; width: 18px; height: 18px; display: grid; place-items: center; font: 600 13px/1 ui-monospace, Menlo, monospace; color: var(--ag-bg); background: var(--ag-magenta); border-radius: 3px; }
+    .ag-drop-preview.dropping { transition: transform 140ms cubic-bezier(.2,.8,.2,1), width 140ms cubic-bezier(.2,.8,.2,1), height 140ms cubic-bezier(.2,.8,.2,1), opacity 140ms ease; }
+    .ag-drag-ghost {
+      position: fixed; top: 0; left: 0;
+      transform: translate3d(0, 0, 0) scale(1.04); transform-origin: 0 0;
+      padding: 0 14px; height: 28px; max-width: 280px;
+      display: flex; align-items: center;
+      background: var(--ag-panel); color: var(--ag-fg);
+      font: 12px -apple-system, "Segoe UI", Roboto, ui-sans-serif, sans-serif;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border: 1px solid var(--ag-border); border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.35);
+      pointer-events: none; z-index: 1001; opacity: 0.92;
+      will-change: transform;
+    }
+    .ag-drag-ghost::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--ag-magenta); border-top-left-radius: 6px; border-top-right-radius: 6px; }
+    .ag-drag-ghost.cancelling { transition: transform 160ms cubic-bezier(.4,0,.2,1), opacity 160ms ease; opacity: 0; }
+    .ag-tab.dragging { opacity: 0.35; border-right-color: var(--ag-magenta); }
+    body.ag-dragging, body.ag-dragging * { cursor: grabbing !important; user-select: none; }
+    body.ag-dragging .ag-hud { opacity: 0.3; transition: opacity 120ms ease; }
+    .ag-hud { transition: opacity 120ms ease; }
+    .ag-drag-hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 6px 10px; background: rgba(11,13,17,0.85); border: 1px solid var(--ag-border); border-radius: 4px; font: 11px ui-monospace, Menlo, monospace; color: var(--ag-fg); z-index: 1002; }
     .ag-drag-hint kbd { background: var(--ag-panel); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--ag-border); font-family: inherit; }
     .ag-wordmark { position: relative; z-index: 1; font-weight: 600; letter-spacing: 0.12em; font-size: 11px; color: var(--ag-fg); pointer-events: none; }
     .ag-wordmark::before { content: ''; position: absolute; left: -18px; top: -10px; width: 110px; height: 36px; background: radial-gradient(closest-side, rgba(217,70,239,0.30), transparent 70%); pointer-events: none; z-index: -1; }
@@ -2126,70 +2166,251 @@ class SplitNode {
 }
 
 const DropOverlay = {
-  el: null,
-  zones: [],
+  // ===== state =====
+  el: null,           // the .ag-drop-overlay container
+  previewEl: null,    // the .ag-drop-preview slab
+  ghostEl: null,      // the .ag-drag-ghost following the cursor
   draggingTab: null,
   fromNode: null,
-  active: null,
+  panes: [],          // [{tabNode, rect, isSource}]
+  currentZone: null,  // {tabNode, kind} | 'self-noop' | null
+  sourceTabRect: null,
+  busy: false,
   _escHandler: null,
+  _resizeHandler: null,
+
+  // ===== constants =====
+  CENTER_EXTENT: 0.30,    // half-width of center merge rect, normalized
+  HYSTERESIS: 0.04,       // normalized units a pointer must travel past a boundary to leave a zone
+  MIN_PANE_SIZE: 80,      // panes smaller than this px are ignored as drop targets
+
   start(tab, fromNode) {
-    this.draggingTab = tab; this.fromNode = fromNode;
+    if (this.busy) return;
+    this.busy = true;
+    this.draggingTab = tab;
+    this.fromNode = fromNode;
+
     this.el = document.createElement('div');
     this.el.className = 'ag-drop-overlay';
     document.body.appendChild(this.el);
+
+    this.previewEl = document.createElement('div');
+    this.previewEl.className = 'ag-drop-preview';
+    this.el.appendChild(this.previewEl);
+
+    this.ghostEl = document.createElement('div');
+    this.ghostEl.className = 'ag-drag-ghost';
+    this.ghostEl.textContent = tab.title;
+    document.body.appendChild(this.ghostEl);
+
     const hint = document.createElement('div');
     hint.className = 'ag-drag-hint';
     hint.innerHTML = 'drag to dock zone &middot; <kbd>esc</kbd> to cancel';
     document.body.appendChild(hint);
     this._hint = hint;
-    this._buildZones();
-    this._escHandler = (e) => {
-      if (e.key === 'Escape') {
-        this._cleanup();
+
+    document.body.classList.add('ag-dragging');
+
+    // Find and remember the source tab DOM, dim it.
+    this.sourceTabEl = null;
+    if (fromNode && fromNode.strip) {
+      const tabIdx = fromNode.tabs.indexOf(tab);
+      const tEls = fromNode.strip.querySelectorAll('.ag-tab');
+      if (tEls[tabIdx]) {
+        this.sourceTabEl = tEls[tabIdx];
+        this.sourceTabRect = this.sourceTabEl.getBoundingClientRect();
+        this.sourceTabEl.classList.add('dragging');
       }
-    };
+    }
+
+    this._buildPanes();
+
+    this._escHandler = (e) => { if (e.key === 'Escape') this._hardCancel(); };
+    this._resizeHandler = () => this._buildPanes();
     document.addEventListener('keydown', this._escHandler);
+    window.addEventListener('resize', this._resizeHandler);
+    window.addEventListener('blur', this._escHandler === null ? () => {} : () => this._hardCancel());
   },
-  _buildZones() {
-    this.zones = [];
+
+  _buildPanes() {
+    this.panes = [];
     const tabNodes = document.querySelectorAll('.ag-tab-node');
-    for (const node of tabNodes) {
-      const r = node.getBoundingClientRect();
-      const w = r.width, h = r.height, cx = r.left + w/2, cy = r.top + h/2;
-      const sz = Math.min(w, h) * 0.18;
-      const zonesDef = [
-        { kind: 'center', x: cx - sz, y: cy - sz, w: sz*2, h: sz*2, label: 'merge', node },
-        { kind: 'top', x: cx - sz, y: r.top + 8, w: sz*2, h: sz, label: 'split top', node },
-        { kind: 'bottom', x: cx - sz, y: r.bottom - sz - 8, w: sz*2, h: sz, label: 'split bottom', node },
-        { kind: 'left', x: r.left + 8, y: cy - sz, w: sz, h: sz*2, label: 'split left', node },
-        { kind: 'right', x: r.right - sz - 8, y: cy - sz, w: sz, h: sz*2, label: 'split right', node }
-      ];
-      for (const z of zonesDef) {
-        const el = document.createElement('div');
-        el.className = 'ag-drop-zone';
-        el.style.left = z.x + 'px'; el.style.top = z.y + 'px';
-        el.style.width = z.w + 'px'; el.style.height = z.h + 'px';
-        el.textContent = z.label;
-        this.el.appendChild(el);
-        this.zones.push(Object.assign({}, z, { el }));
+    for (const el of tabNodes) {
+      const tn = afterglow._findTabNodeByEl(el);
+      if (!tn) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < this.MIN_PANE_SIZE || r.height < this.MIN_PANE_SIZE) continue;
+      this.panes.push({
+        tabNode: tn,
+        rect: { x: r.left, y: r.top, w: r.width, h: r.height },
+        isSource: tn === this.fromNode
+      });
+    }
+  },
+
+  _zoneAt(pane, x, y) {
+    const R = pane.rect;
+    const u = (x - R.x) / R.w;
+    const v = (y - R.y) / R.h;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+    const dL = u, dR = 1 - u, dT = v, dB = 1 - v;
+    const minD = Math.min(dL, dR, dT, dB);
+    if (minD >= this.CENTER_EXTENT) return 'center';
+    // Otherwise: dominant edge (smallest d) is the split direction.
+    if (dL === minD) return 'left';
+    if (dR === minD) return 'right';
+    if (dT === minD) return 'top';
+    return 'bottom';
+  },
+
+  // Apply hysteresis: only allow leaving currentZone if pointer has crossed
+  // the boundary by HYSTERESIS in normalized units.
+  _zoneWithHysteresis(pane, x, y, prev) {
+    const candidate = this._zoneAt(pane, x, y);
+    if (!prev || prev.tabNode !== pane.tabNode) return candidate;
+    if (candidate === prev.kind) return candidate;
+    // Stickiness: stay in prev unless we've cleared the threshold.
+    const R = pane.rect;
+    const u = (x - R.x) / R.w;
+    const v = (y - R.y) / R.h;
+    const dL = u, dR = 1 - u, dT = v, dB = 1 - v;
+    const ext = this.CENTER_EXTENT;
+    const h = this.HYSTERESIS;
+    if (prev.kind === 'center') {
+      if (Math.min(dL, dR, dT, dB) >= ext - h) return 'center';
+    } else {
+      const map = { left: dL, right: dR, top: dT, bottom: dB };
+      const prevD = map[prev.kind];
+      if (prevD < ext && prevD === Math.min(dL, dR, dT, dB) - h * 0) {
+        return prev.kind;
       }
+      // Only leave if candidate edge's d is at least HYSTERESIS smaller than prev's d.
+      const candD = candidate === 'center' ? Math.min(dL, dR, dT, dB) : map[candidate];
+      if (Math.abs(prevD - candD) < h) return prev.kind;
     }
+    return candidate;
   },
+
+  _previewRectFor(pane, kind) {
+    const R = pane.rect;
+    if (kind === 'center') return { x: R.x, y: R.y, w: R.w, h: R.h };
+    if (kind === 'left')   return { x: R.x, y: R.y, w: R.w / 2, h: R.h };
+    if (kind === 'right')  return { x: R.x + R.w / 2, y: R.y, w: R.w / 2, h: R.h };
+    if (kind === 'top')    return { x: R.x, y: R.y, w: R.w, h: R.h / 2 };
+    if (kind === 'bottom') return { x: R.x, y: R.y + R.h / 2, w: R.w, h: R.h / 2 };
+    return null;
+  },
+
   update(x, y) {
-    let hover = null;
-    for (const z of this.zones) {
-      if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) hover = z;
+    if (!this.ghostEl) return;
+    // Ghost follows the cursor, no transition (any lag here looks broken).
+    this.ghostEl.style.transform = `translate3d(${Math.round(x + 12)}px, ${Math.round(y + 8)}px, 0) scale(1.04)`;
+
+    // Find the pane the pointer is over.
+    let hitPane = null;
+    for (const p of this.panes) {
+      const R = p.rect;
+      if (x >= R.x && x <= R.x + R.w && y >= R.y && y <= R.y + R.h) { hitPane = p; break; }
     }
-    if (hover !== this.active) {
-      if (this.active) this.active.el.classList.remove('hover');
-      if (hover) hover.el.classList.add('hover');
-      this.active = hover;
+
+    if (!hitPane) {
+      if (this.currentZone !== null) {
+        this.currentZone = null;
+        this.previewEl.classList.remove('visible', 'noop');
+      }
+      return;
     }
+
+    const prev = (this.currentZone && typeof this.currentZone === 'object') ? this.currentZone : null;
+    const kind = this._zoneWithHysteresis(hitPane, x, y, prev);
+    if (!kind) {
+      if (this.currentZone !== null) {
+        this.currentZone = null;
+        this.previewEl.classList.remove('visible', 'noop');
+      }
+      return;
+    }
+
+    // Source-pane interactions: any drop on the source pane is a no-op (matches user choice).
+    if (hitPane.isSource) {
+      // Show a faint slab covering the whole pane so the user gets feedback that this is a no-op.
+      if (this.currentZone === 'self-noop' && this.previewEl.dataset.zone === 'self') return;
+      this.currentZone = 'self-noop';
+      const R = hitPane.rect;
+      this._writePreview(R.x, R.y, R.w, R.h, 'self');
+      this.previewEl.classList.add('visible', 'noop');
+      return;
+    }
+
+    const newZone = { tabNode: hitPane.tabNode, kind };
+    if (prev && prev.tabNode === newZone.tabNode && prev.kind === newZone.kind) {
+      return; // fast path: same zone, no DOM writes
+    }
+
+    const rect = this._previewRectFor(hitPane, kind);
+    this.currentZone = newZone;
+    this._writePreview(rect.x, rect.y, rect.w, rect.h, kind);
+    this.previewEl.classList.remove('noop');
+    this.previewEl.classList.add('visible');
   },
+
+  _writePreview(x, y, w, h, zoneAttr) {
+    const s = this.previewEl.style;
+    s.setProperty('--x', Math.round(x) + 'px');
+    s.setProperty('--y', Math.round(y) + 'px');
+    s.setProperty('--w', Math.round(w) + 'px');
+    s.setProperty('--h', Math.round(h) + 'px');
+    if (this.previewEl.dataset.zone !== zoneAttr) this.previewEl.dataset.zone = zoneAttr;
+  },
+
   end(x, y) {
     this.update(x, y);
-    if (this.active) this._performDrop(this.active);
+    const cz = this.currentZone;
+    const validDrop = cz && typeof cz === 'object' && cz.tabNode && cz.kind;
+    if (validDrop) {
+      // Confirm-morph: keep slab at zone shape during the 140ms morph, then perform drop.
+      this.previewEl.classList.add('dropping');
+      try { this._performDrop(cz); } catch (e) { console.error(e); }
+      // Clean up after the morph window.
+      setTimeout(() => this._cleanup(), 150);
+    } else {
+      // Pointer released over empty/invalid space: animated snap-back of ghost toward source tab.
+      this._snapBackCancel();
+    }
+  },
+
+  _hardCancel() {
+    // Esc: instant exit, no animation.
     this._cleanup();
+  },
+
+  _snapBackCancel() {
+    if (this.ghostEl && this.sourceTabRect) {
+      const tx = Math.round(this.sourceTabRect.left);
+      const ty = Math.round(this.sourceTabRect.top);
+      this.ghostEl.classList.add('cancelling');
+      this.ghostEl.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(0.6)`;
+    }
+    if (this.previewEl) this.previewEl.classList.remove('visible');
+    setTimeout(() => this._cleanup(), 170);
+  },
+
+  _performDrop(zone) {
+    const targetTabNode = zone.tabNode;
+    if (!targetTabNode) return;
+    const tab = this.draggingTab;
+    const fromNode = this.fromNode;
+    if (zone.kind === 'center') {
+      if (targetTabNode === fromNode) return;
+      fromNode.removeTab(tab);
+      targetTabNode.addTab(tab);
+    } else {
+      fromNode.removeTab(tab);
+      const newNode = new TabNode();
+      newNode.addTab(tab);
+      this._splitInto(targetTabNode, newNode, zone.kind);
+    }
+    if (fromNode.tabs.length === 0) this._collapse(fromNode);
   },
   _performDrop(zone) {
     const targetTabNode = afterglow._findTabNodeByEl(zone.node);
@@ -2262,13 +2483,20 @@ const DropOverlay = {
     }
   },
   _cleanup() {
+    if (this.sourceTabEl) { this.sourceTabEl.classList.remove('dragging'); this.sourceTabEl = null; }
     if (this.el) { this.el.remove(); this.el = null; }
+    if (this.ghostEl) { this.ghostEl.remove(); this.ghostEl = null; }
+    if (this.previewEl) { this.previewEl = null; }
     if (this._hint) { this._hint.remove(); this._hint = null; }
     if (this._escHandler) { document.removeEventListener('keydown', this._escHandler); this._escHandler = null; }
-    this.zones = [];
-    this.active = null;
+    if (this._resizeHandler) { window.removeEventListener('resize', this._resizeHandler); this._resizeHandler = null; }
+    document.body.classList.remove('ag-dragging');
+    this.panes = [];
+    this.currentZone = null;
+    this.sourceTabRect = null;
     this.draggingTab = null;
     this.fromNode = null;
+    this.busy = false;
   }
 };
 afterglow.DropOverlay = DropOverlay;
