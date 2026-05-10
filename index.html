@@ -854,7 +854,11 @@ afterglow.FirehoseModel = FirehoseModel;
 // §4 Styles (CPU side — used by text + overlay layers)
 const DEFAULT_STYLE = Object.freeze({
   bg: '#ffffff',
-  gridline: '#e0e0e0',
+  // Gridlines are translucent so cell-fill colors bleed through them — the
+  // overlay layer paints on top of the fill layer, so an opaque gridline
+  // would obscure the heatmap; an alpha-blended one separates cells without
+  // erasing color information.
+  gridline: 'rgba(0,0,0,0.10)',
   rowHeaderBg: '#f7f7f7',
   colHeaderBg: '#f7f7f7',
   selectionFill: 'rgba(33,150,243,0.2)',
@@ -868,7 +872,7 @@ const DEFAULT_STYLE = Object.freeze({
 const BLUE_STRIPE_STYLE = Object.freeze({ ...DEFAULT_STYLE, rowStripeA: 'rgba(138,172,200,0.3)', colStripeA: 'rgba(100,100,100,0.1)' });
 const BROWN_STRIPE_STYLE = Object.freeze({ ...DEFAULT_STYLE, colStripeA: 'rgba(165,143,53,0.2)' });
 const GREEN_STRIPE_STYLE = Object.freeze({ ...DEFAULT_STYLE, rowStripeA: 'rgba(64,115,53,0.2)' });
-const LIGHT_SELECTION_STYLE = Object.freeze({ ...DEFAULT_STYLE, selectionFill: 'rgba(255,255,255,0.2)', selectionBorder: 'white', cursorBorder: 'white' });
+const LIGHT_SELECTION_STYLE = Object.freeze({ ...DEFAULT_STYLE, gridline: 'rgba(255,255,255,0.18)', selectionFill: 'rgba(255,255,255,0.2)', selectionBorder: 'white', cursorBorder: 'white' });
 
 afterglow.styles = { DEFAULT_STYLE, BLUE_STRIPE_STYLE, BROWN_STRIPE_STYLE, GREEN_STRIPE_STYLE, LIGHT_SELECTION_STYLE };
 
@@ -1331,8 +1335,14 @@ class Grid {
 
     this.el.addEventListener('wheel', (e) => {
       e.preventDefault();
-      if (e.shiftKey) this._setScroll(this.scrollX + e.deltaY, this.scrollY);
-      else this._setScroll(this.scrollX + e.deltaX, this.scrollY + e.deltaY);
+      // Scale wheel deltas by log10(maxScroll) so trillion-row grids feel
+      // responsive instead of "dead": one tick on Two Trillion was
+      // 100 / 4e13 = 2.5e-12 of total content (thumb couldn't move a pixel).
+      // Normal-sized grids (cars, etc.) keep ~1.0 scaling.
+      const yScale = Math.max(1, Math.log10(Math.max(1000, this._maxScrollY()) / 1000));
+      const xScale = Math.max(1, Math.log10(Math.max(1000, this._maxScrollX()) / 1000));
+      if (e.shiftKey) this._setScroll(this.scrollX + e.deltaY * xScale, this.scrollY);
+      else this._setScroll(this.scrollX + e.deltaX * xScale, this.scrollY + e.deltaY * yScale);
     }, { passive: false });
 
     // Vertical thumb drag
